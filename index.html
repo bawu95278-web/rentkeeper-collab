@@ -20,22 +20,9 @@
     ::-webkit-scrollbar { width: 4px; height: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
-    #loading-screen {
-      position: fixed; inset: 0;
-      background: linear-gradient(135deg, #f0f4ff 0%, #fafafa 60%, #fff7ed 100%);
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 16px; z-index: 9999;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .spinner { width: 24px; height: 24px; border-radius: 50%; border: 3px solid #e5e7eb; border-top-color: #1d4ed8; animation: spin 0.8s linear infinite; }
   </style>
 </head>
 <body>
-  <div id="loading-screen">
-    <p style="font-size:16px;font-weight:700;color:#1d4ed8;">家樂美房產管理顧問有限公司</p>
-    <div class="spinner"></div>
-    <p style="color:#9ca3af;font-size:13px;">載入中，請稍候...</p>
-  </div>
   <div id="root"></div>
   <script>
     window.storage = {
@@ -54,14 +41,2034 @@
       }
     };
   </script>
-  <script type="text/babel" src="app.jsx" data-presets="react"></script>
-  <script>
-    window.addEventListener('load', function() {
-      setTimeout(function() {
-        var ls = document.getElementById('loading-screen');
-        if (ls) ls.style.display = 'none';
-      }, 4000);
+  <script type="text/babel" data-presets="react">
+const { useState, useEffect, useCallback, useRef } = React;
+
+// ═══════════════════════════════════════════════════════
+//  STORAGE (in-memory for JSX artifact environment)
+// ═══════════════════════════════════════════════════════
+const memStore = {};
+const storage = {
+  get: (key) => {
+    const v = memStore[key];
+    if (v === undefined) return Promise.reject(new Error("Key not found: " + key));
+    return Promise.resolve({ key, value: v });
+  },
+  set: (key, value) => { memStore[key] = value; return Promise.resolve({ key, value }); },
+  remove: (key) => { delete memStore[key]; return Promise.resolve({ key, deleted: true }); },
+};
+
+// ═══════════════════════════════════════════════════════
+//  ROLES
+// ═══════════════════════════════════════════════════════
+const ROLES = {
+  superadmin: { label: "後台維修", color: "#dc2626", badge: "★", canEdit: true, canDelete: true, canManageUsers: true, canViewFinance: true, pages: ["dashboard","rooms","tenants","bills","repairs","report","users","log"] },
+  admin:      { label: "管理員",   color: "#2563eb", badge: "▲", canEdit: true, canDelete: false, canManageUsers: false, canViewFinance: true, pages: ["dashboard","rooms","tenants","bills","repairs","report","users","log"] },
+  staff:      { label: "工作人員", color: "#d97706", badge: "●", canEdit: true, canDelete: false, canManageUsers: false, canViewFinance: false, pages: ["tenants","repairs"] },
+  viewer:     { label: "租客",     color: "#6b7280", badge: "○", canEdit: false, canDelete: false, canManageUsers: false, canViewFinance: false, pages: ["rooms","bills","repairs"] },
+  system:     { label: "系統",     color: "#9ca3af", badge: "◆", canEdit: false, canDelete: false, canManageUsers: false, canViewFinance: false, pages: [] },
+};
+const safeRole = (r) => ROLES[r] || ROLES.viewer;
+
+// ═══════════════════════════════════════════════════════
+//  DEFAULT DATA
+// ═══════════════════════════════════════════════════════
+const DEFAULT_DATA = {
+  users: [
+    { id: "u2", name: "林小雯", email: "staff@rentkeeper.tw", password: "staff123", role: "admin", avatar: "林", online: false },
+    { id: "u3", name: "陳建志", email: "view@rentkeeper.tw",  password: "view123",  role: "viewer", avatar: "陳", online: false },
+    { id: "u4", name: "憲哥",   email: "okdnhaco@gmail.com",  password: "LIN082921", role: "superadmin", avatar: "憲", online: false },
+    { id: "u5", name: "婉婷",   email: "a0000196@gmail.com",  password: "LIN082921", role: "superadmin", avatar: "婉", online: false },
+    { id: "u6", name: "管理員", email: "okdnhaco@gmail.com",  password: "lin082921", role: "admin", avatar: "管", online: false },
+  ],
+  rooms: [
+    { id: "r1", communityName: "101室", rent: 12000, status: "rented", tenantId: "t1", rentDay: "5", leaseStart: "2024-03-01", contractEnd: "2025-03-01", tenantContactName: "張小華", tenantContactPhone: "0912-345-678", cohabitants: [], renewals: [] },
+    { id: "r2", communityName: "102室", rent: 14000, status: "rented", tenantId: "t2", rentDay: "5", leaseStart: "2024-01-15", contractEnd: "2025-01-15", tenantContactName: "李美麗", tenantContactPhone: "0923-456-789", cohabitants: [], renewals: [] },
+    { id: "r3", communityName: "201室", rent: 12000, status: "vacant", tenantId: null, rentDay: "5", leaseStart: "", contractEnd: "", tenantContactName: "", tenantContactPhone: "", cohabitants: [], renewals: [] },
+    { id: "r4", communityName: "202室", rent: 16000, status: "rented", tenantId: "t5", rentDay: "5", leaseStart: "2025-04-01", contractEnd: "2026-04-25", tenantContactName: "竑進", tenantContactPhone: "0967-368-713", cohabitants: [{ name: "雨潔", phone: "0931-368-713" }], renewals: [] },
+    { id: "r5", communityName: "A01",   rent: 18000, status: "rented", tenantId: "t4", rentDay: "5", leaseStart: "2024-06-01", contractEnd: "2025-06-01", tenantContactName: "林淑芬", tenantContactPhone: "0945-678-901", cohabitants: [], renewals: [] },
+    { id: "r6", communityName: "B01",   rent: 22000, status: "vacant", tenantId: null, rentDay: "5", leaseStart: "", contractEnd: "", tenantContactName: "", tenantContactPhone: "", cohabitants: [], renewals: [] },
+  ],
+  tenants: [
+    { id: "t1", name: "張小華", phone: "0912-345-678", email: "a@email.com", roomId: "r1", moveIn: "2024-03-01", contractEnd: "2025-05-01", deposit: 24000 },
+    { id: "t2", name: "李美麗", phone: "0923-456-789", email: "b@email.com", roomId: "r2", moveIn: "2024-01-15", contractEnd: "2025-07-15", deposit: 28000 },
+    { id: "t3", name: "陳志偉", phone: "0934-567-890", email: "c@email.com", roomId: "", moveIn: "2023-11-01", contractEnd: "2025-08-01", deposit: 32000 },
+    { id: "t4", name: "林淑芬", phone: "0945-678-901", email: "d@email.com", roomId: "r5", moveIn: "2024-06-01", contractEnd: "2025-06-01", deposit: 36000 },
+    { id: "t5", name: "竑進",   phone: "0967-368-713", email: "", roomId: "r4", moveIn: "2025-04-01", contractEnd: "2026-04-25", deposit: 0, linkedRoom: "r4", isCohabitant: false },
+    { id: "t6", name: "雨潔",   phone: "0931-368-713", email: "", roomId: "r4", moveIn: "2025-04-01", contractEnd: "2026-04-25", deposit: 0, isCohabitant: true, linkedRoom: "r4" },
+  ],
+  bills: [
+    { id: "b1", tenantId: "t1", roomId: "r1", type: "rent", amount: 12000, month: "2025-04", status: "paid",   paidDate: "2025-04-03", recordedBy: "u4" },
+    { id: "b2", tenantId: "t2", roomId: "r2", type: "rent", amount: 14000, month: "2025-04", status: "unpaid", paidDate: null, recordedBy: null },
+    { id: "b3", tenantId: "t5", roomId: "r4", type: "rent", amount: 16000, month: "2025-04", status: "unpaid", paidDate: null, recordedBy: null },
+    { id: "b4", tenantId: "t4", roomId: "r5", type: "rent", amount: 18000, month: "2025-04", status: "paid",   paidDate: "2025-04-02", recordedBy: "u2" },
+  ],
+  repairs: [
+    { id: "rep1", roomId: "r2", tenantName: "李美麗", title: "冷氣不製冷", desc: "冷氣開了但不冷", status: "pending",     date: "2025-04-01", priority: "high", photos: [] },
+    { id: "rep2", roomId: "r4", tenantName: "陳志偉", title: "廁所漏水",   desc: "馬桶旁邊地板有水", status: "in_progress", date: "2025-03-28", priority: "high", photos: [] },
+  ],
+  activityLog: [
+    { id: "log1", userId: "u4", action: "標記 101室 已繳租", timestamp: "2025-04-03T09:15:00" },
+    { id: "log2", userId: "u2", action: "標記 A01 已繳租",   timestamp: "2025-04-02T14:30:00" },
+    { id: "log3", userId: "u2", action: "更新報修 rep2 為處理中", timestamp: "2025-03-28T10:00:00" },
+  ],
+  chatTemplates: [
+    "提醒您又到了匯租金的時間，麻煩您上傳匯款截圖。",
+    "您好，請問收到我們的訊息了嗎？",
+    "如有任何問題請隨時聯繫我們，謝謝！",
+    "感謝您的配合，祝您生活愉快！",
+  ],
+};
+
+// ═══════════════════════════════════════════════════════
+//  STORAGE KEYS & HELPERS
+// ═══════════════════════════════════════════════════════
+const STORE_KEY    = "rentkeeper-v1";
+const BASELINE_KEY = "rentkeeper-baseline-v1";
+
+async function loadData() {
+  try { const r = await storage.get(STORE_KEY); return JSON.parse(r.value); } catch { return null; }
+}
+async function saveData(d) {
+  try { await storage.set(STORE_KEY, JSON.stringify(d)); } catch {}
+}
+async function loadBaseline() {
+  try { const r = await storage.get(BASELINE_KEY); return JSON.parse(r.value); } catch { return null; }
+}
+async function saveBaseline(d) {
+  try { await storage.set(BASELINE_KEY, JSON.stringify(d)); } catch {}
+}
+
+// ═══════════════════════════════════════════════════════
+//  UTILS
+// ═══════════════════════════════════════════════════════
+const fmt       = (n) => `NT$ ${Number(n || 0).toLocaleString()}`;
+const uid       = () => Math.random().toString(36).slice(2, 9);
+const nowISO    = () => new Date().toISOString();
+const todayStr  = () => new Date().toISOString().slice(0, 10);
+const addOneYear = (s) => { if (!s) return ""; const d = new Date(s); d.setFullYear(d.getFullYear()+1); return d.toISOString().slice(0,10); };
+const daysUntil = (d) => Math.ceil((new Date(d) - new Date()) / 86400000);
+const toROC = (s, t=false) => {
+  if (!s) return "—";
+  const d = new Date(s); if (isNaN(d)) return s;
+  const y = d.getFullYear()-1911, mo = String(d.getMonth()+1).padStart(2,"0"), dy = String(d.getDate()).padStart(2,"0");
+  if (t) { const h=String(d.getHours()).padStart(2,"0"), m=String(d.getMinutes()).padStart(2,"0"); return `民國${y}年${mo}月${dy}日 ${h}:${m}`; }
+  return `民國${y}年${mo}月${dy}日`;
+};
+const toROCMonth = (s) => { if (!s) return "—"; const p=s.split("-"); return p.length>=2?`民國${parseInt(p[0])-1911}年${p[1]}月`:s; };
+const SL = { rented:"已出租", vacant:"空房", pending:"待處理", in_progress:"處理中", done:"已完成", paid:"已繳", unpaid:"未繳", rent:"租金", electric:"電費" };
+
+// ═══════════════════════════════════════════════════════
+//  THEME
+// ═══════════════════════════════════════════════════════
+const T = {
+  bg:"#ffffff", bgSub:"#f9fafb", bgMuted:"#f3f4f6",
+  border:"#e5e7eb", borderMd:"#d1d5db",
+  text:"#111827", textSub:"#6b7280", textMuted:"#9ca3af",
+  accent:"#1d4ed8", accentBg:"#eff6ff",
+  green:"#16a34a", greenBg:"#f0fdf4",
+  red:"#dc2626", redBg:"#fef2f2",
+  amber:"#d97706", amberBg:"#fffbeb",
+  blue:"#2563eb", purple:"#7c3aed",
+};
+
+const S = {
+  input: { width:"100%", background:T.bg, border:`1px solid ${T.borderMd}`, borderRadius:8, color:T.text, padding:"10px 12px", fontSize:15, boxSizing:"border-box", marginBottom:12, outline:"none", fontFamily:"inherit" },
+  label: { display:"block", color:T.textSub, fontSize:12, marginBottom:4, fontWeight:600, letterSpacing:"0.07em", textTransform:"uppercase" },
+  btn: (c=T.accent, ghost=false) => ({ background:ghost?"transparent":c, color:ghost?c:"#fff", border:`1px solid ${c}`, borderRadius:7, padding:"8px 14px", fontSize:14, fontWeight:600, cursor:"pointer", display:"inline-flex", alignItems:"center", gap:5, fontFamily:"inherit" }),
+  card: { background:T.bg, border:`1px solid ${T.border}`, borderRadius:12, padding:16 },
+  tag: (c) => ({ fontSize:12, fontWeight:600, background:(c||T.textMuted)+"18", color:c||T.textMuted, padding:"2px 8px", borderRadius:99 }),
+  title: { fontSize:18, fontWeight:700, color:T.text, margin:0, marginBottom:16 },
+};
+
+// ═══════════════════════════════════════════════════════
+//  ICONS
+// ═══════════════════════════════════════════════════════
+const Icon = ({ n, s=18 }) => {
+  const p = { width:s, height:s, fill:"none", stroke:"currentColor", strokeWidth:"2", viewBox:"0 0 24 24" };
+  const icons = {
+    home:     <svg {...p}><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
+    users:    <svg {...p}><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>,
+    dollar:   <svg {...p}><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>,
+    tool:     <svg {...p}><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>,
+    file:     <svg {...p}><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>,
+    chart:    <svg {...p}><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>,
+    plus:     <svg {...p}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+    bell:     <svg {...p}><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>,
+    x:        <svg {...p}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+    shield:   <svg {...p}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
+    logout:   <svg {...p}><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>,
+    edit:     <svg {...p}><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+    trash:    <svg {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>,
+    check:    <svg {...p} strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>,
+    refresh:  <svg {...p}><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>,
+    lock:     <svg {...p}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>,
+    activity: <svg {...p}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>,
+    building: <svg {...p}><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M9 2v20M15 2v20M2 9h20M2 15h20"/></svg>,
+    person:   <svg {...p}><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
+    build:    <svg {...p}><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>,
+    phone:    <svg {...p}><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81a19.79 19.79 0 01-3.07-8.67A2 2 0 012 1h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.91 8.91a16 16 0 006.18 6.18l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>,
+  };
+  return icons[n] || null;
+};
+
+// ═══════════════════════════════════════════════════════
+//  UI PRIMITIVES
+// ═══════════════════════════════════════════════════════
+function Modal({ title, onClose, children, width=480 }) {
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.35)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16, backdropFilter:"blur(4px)" }}>
+      <div style={{ background:T.bg, border:`1px solid ${T.border}`, borderRadius:16, width:"100%", maxWidth:width, maxHeight:"90vh", overflow:"auto", boxShadow:"0 24px 48px rgba(0,0,0,0.14)" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"16px 20px 14px", borderBottom:`1px solid ${T.border}`, position:"sticky", top:0, background:T.bg, zIndex:1 }}>
+          <span style={{ fontWeight:700, fontSize:15, color:T.text }}>{title}</span>
+          <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer", color:T.textSub, padding:4, borderRadius:6, display:"flex" }}><Icon n="x"/></button>
+        </div>
+        <div style={{ padding:20 }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function Toast({ msg, type }) {
+  const bg = type==="error"?T.red : type==="chat"?T.text : T.green;
+  return <div style={{ position:"fixed", bottom:90, left:"50%", transform:"translateX(-50%)", background:bg, color:"#fff", padding:"10px 20px", borderRadius:10, fontSize:14, fontWeight:600, zIndex:9999, boxShadow:"0 4px 20px rgba(0,0,0,0.22)", whiteSpace:"nowrap", maxWidth:"90vw", overflow:"hidden", textOverflow:"ellipsis" }}>{msg}</div>;
+}
+
+function AvatarBadge({ user, size=34 }) {
+  const r = safeRole(user.role);
+  return (
+    <div style={{ position:"relative", display:"inline-flex" }}>
+      <div style={{ width:size, height:size, borderRadius:"50%", background:r.color+"22", border:`1.5px solid ${r.color}55`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:size*0.38, fontWeight:700, color:r.color }}>{user.avatar||(user.name||"?")[0]}</div>
+      <div style={{ position:"absolute", bottom:-1, right:-1, width:10, height:10, borderRadius:"50%", background:user.online?T.green:T.borderMd, border:`2px solid ${T.bg}` }}/>
+    </div>
+  );
+}
+
+function ROCDateInput({ value, onChange }) {
+  const sel = { flex:1, background:T.bg, border:`1px solid ${T.borderMd}`, borderRadius:8, color:T.text, padding:"10px 4px", fontSize:14, outline:"none", cursor:"pointer", fontFamily:"inherit" };
+  const parts = value ? value.split("-") : ["","",""];
+  const rocYear = parts[0] ? String(parseInt(parts[0])-1911) : "";
+  const month   = parts[1]||"";
+  const day     = parts[2]||"";
+  const emit = (y,m,d) => { if(y&&m&&d) onChange({ target:{ value:`${parseInt(y)+1911}-${m}-${d}` } }); };
+  return (
+    <div style={{ display:"flex", gap:4, marginBottom:12 }}>
+      <select value={rocYear} onChange={e=>emit(e.target.value,month,day)} style={sel}>
+        <option value="">民國年</option>
+        {Array.from({length:36},(_,i)=>95+i).map(y=><option key={y} value={y}>民國 {y} 年</option>)}
+      </select>
+      <select value={month} onChange={e=>emit(rocYear,e.target.value,day)} style={sel}>
+        <option value="">月</option>
+        {Array.from({length:12},(_,i)=>String(i+1).padStart(2,"0")).map(m=><option key={m} value={m}>{parseInt(m)} 月</option>)}
+      </select>
+      <select value={day} onChange={e=>emit(rocYear,month,e.target.value)} style={sel}>
+        <option value="">日</option>
+        {Array.from({length:31},(_,i)=>String(i+1).padStart(2,"0")).map(d=><option key={d} value={d}>{parseInt(d)} 日</option>)}
+      </select>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+//  CREDENTIAL STORE — 每個身份類型各存一份「記住我」憑證
+//  格式：{ tenant: { phone, rememberMe }, admin: { email, pw, rememberMe }, superadmin: { email, pw, rememberMe } }
+// ═══════════════════════════════════════════════════════
+const CRED_KEY     = "rentkeeper-credentials-v1";
+const ACCOUNTS_KEY = "rentkeeper-quick-accounts-v1";
+
+function loadCreds() {
+  try { const v = memStore[CRED_KEY]; return v ? JSON.parse(v) : {}; } catch { return {}; }
+}
+function saveCreds(obj) {
+  memStore[CRED_KEY] = JSON.stringify(obj);
+}
+function loadAccounts() {
+  try { const v = memStore[ACCOUNTS_KEY]; return v ? JSON.parse(v) : []; } catch { return []; }
+}
+function persistAccount(entry) {
+  const prev = loadAccounts();
+  const uk = entry.email || entry.phone;
+  const next = [entry, ...prev.filter(a => (a.email || a.phone) !== uk)].slice(0, 6);
+  memStore[ACCOUNTS_KEY] = JSON.stringify(next);
+}
+function dropAccount(uk) {
+  memStore[ACCOUNTS_KEY] = JSON.stringify(loadAccounts().filter(a => (a.email || a.phone) !== uk));
+}
+
+// ═══════════════════════════════════════════════════════
+//  LOGIN
+// ═══════════════════════════════════════════════════════
+function LoginScreen({ users, tenants, onLogin }) {
+  const rolesMeta = [
+    { key:"tenant",     label:"租客",     icon:"person", color:"#6b7280", bg:"#f3f4f6" },
+    { key:"admin",      label:"管理員",   icon:"shield", color:"#2563eb", bg:"#eff6ff" },
+    { key:"superadmin", label:"後台維修", icon:"build",  color:"#dc2626", bg:"#fef2f2" },
+  ];
+  const roleLabel = { tenant:"租客", admin:"管理員", superadmin:"後台維修" };
+  const roleColor = { tenant:"#6b7280", admin:"#2563eb", superadmin:"#dc2626" };
+
+  // ── 初始化：從 memStore 載入上次的記住我憑證 ────────
+  const initCreds = loadCreds();
+  const [sel, setSel]         = useState(null);
+  const [phone, setPhone]     = useState("");
+  const [email, setEmail]     = useState("");
+  const [pw, setPw]           = useState("");
+  // 每個 tab 各自的記住我勾選狀態
+  const [rememberMe, setRememberMe] = useState({
+    tenant:     initCreds.tenant?.rememberMe     || false,
+    admin:      initCreds.admin?.rememberMe      || false,
+    superadmin: initCreds.superadmin?.rememberMe || false,
+  });
+  const [err, setErr]         = useState("");
+  const [loading, setLoading] = useState(false);
+  const [accounts, setAccounts]     = useState(() => loadAccounts());
+  const [showAccounts, setShowAccounts] = useState(true);
+  const [confirmRemove, setConfirmRemove] = useState(null);
+  // 記住我已帶入標記（顯示小綠勾）
+  const [autoFilled, setAutoFilled] = useState(false);
+
+  // ── 切換身份時自動帶入「記住我」的已儲存憑證 ────────
+  const switchRole = (roleKey) => {
+    setSel(roleKey);
+    setErr(""); setAutoFilled(false);
+    const cred = loadCreds()[roleKey];
+    if (cred?.rememberMe) {
+      if (roleKey === "tenant") {
+        setPhone(cred.phone || ""); setEmail(""); setPw("");
+        setAutoFilled(true);
+      } else {
+        setEmail(cred.email || ""); setPw(cred.pw || ""); setPhone("");
+        setAutoFilled(true);
+      }
+    } else {
+      setPhone(""); setEmail(""); setPw("");
+    }
+    setShowAccounts(false);
+  };
+
+  // ── 更新「記住我」勾選 ──────────────────────────────
+  const toggleRemember = () => {
+    if (!sel) return;
+    const next = !rememberMe[sel];
+    setRememberMe(r => ({ ...r, [sel]: next }));
+    // 若取消勾選，立即清除該身份的已儲存憑證
+    if (!next) {
+      const creds = loadCreds();
+      delete creds[sel];
+      saveCreds(creds);
+    }
+  };
+
+  const canSubmit = sel === "tenant"
+    ? phone.trim().length >= 8
+    : (email.trim().length > 0 && pw.trim().length > 0);
+
+  // ── 執行登入 ─────────────────────────────────────────
+  const doLogin = (overrides = {}) => {
+    const fSel   = overrides.sel   ?? sel;
+    const fEmail = overrides.email ?? email;
+    const fPw    = overrides.pw    ?? pw;
+    const fPhone = overrides.phone ?? phone;
+    setLoading(true);
+    setTimeout(() => {
+      if (fSel === "tenant") {
+        const ni = fPhone.replace(/[-\s]/g, "");
+        const t  = (tenants||[]).find(t => (t.phone||"").replace(/[-\s]/g,"") === ni);
+        if (!t) { setErr("找不到此手機號碼的租客"); setLoading(false); return; }
+        // 儲存記住我憑證
+        const creds = loadCreds();
+        const curRemember = overrides.remember ?? rememberMe.tenant;
+        if (curRemember) { creds.tenant = { phone: t.phone, rememberMe: true }; saveCreds(creds); }
+        else { delete creds.tenant; saveCreds(creds); }
+        // 儲存快速帳號
+        persistAccount({ type:"tenant", name:t.name, phone:t.phone, role:"viewer", avatar:(t.name||"租")[0], color:"#6b7280", lastLogin:new Date().toISOString() });
+        setAccounts(loadAccounts());
+        onLogin({ id:t.id, name:t.name, email:t.email||"", role:"viewer", avatar:(t.name||"租")[0], online:true, _tenantId:t.id, _roomId:t.roomId });
+      } else {
+        const u = (users||[]).find(u => u.email===fEmail && u.password===fPw && u.role===fSel);
+        if (u) {
+          const creds = loadCreds();
+          const curRemember = overrides.remember ?? rememberMe[fSel];
+          if (curRemember) { creds[fSel] = { email:u.email, pw:fPw, rememberMe:true }; saveCreds(creds); }
+          else { delete creds[fSel]; saveCreds(creds); }
+          persistAccount({ type:fSel, name:u.name, email:u.email, role:u.role, avatar:u.avatar||u.name[0], color:safeRole(u.role).color, lastLogin:new Date().toISOString() });
+          setAccounts(loadAccounts());
+          onLogin(u);
+        } else {
+          setErr("帳號或密碼錯誤");
+          setLoading(false);
+        }
+      }
+    }, 480);
+  };
+
+  // ── 點擊快速帳號卡片 ─────────────────────────────────
+  const handleQuickSelect = (acct) => {
+    setErr("");
+    const cred = loadCreds()[acct.type];
+    if (acct.type === "tenant") {
+      // tenant：若有記住我直接登入，否則帶入 phone 進表單
+      if (cred?.rememberMe && cred.phone) {
+        setSel("tenant"); setPhone(cred.phone); setEmail(""); setPw("");
+        setRememberMe(r => ({ ...r, tenant: true }));
+        setShowAccounts(false); setAutoFilled(true);
+        doLogin({ sel:"tenant", phone:cred.phone, remember:true });
+      } else {
+        setSel("tenant"); setPhone(acct.phone||""); setEmail(""); setPw("");
+        setAutoFilled(false); setShowAccounts(false);
+        setTimeout(() => { document.getElementById("rk-phone-input")?.focus(); }, 80);
+      }
+    } else {
+      // admin / superadmin：若有記住我直接登入，否則帶入 email 進表單
+      if (cred?.rememberMe && cred.email && cred.pw) {
+        setSel(acct.type); setEmail(cred.email); setPw(cred.pw); setPhone("");
+        setRememberMe(r => ({ ...r, [acct.type]: true }));
+        setShowAccounts(false); setAutoFilled(true);
+        doLogin({ sel:acct.type, email:cred.email, pw:cred.pw, remember:true });
+      } else {
+        setSel(acct.type); setEmail(acct.email||""); setPw(""); setPhone("");
+        setAutoFilled(false); setShowAccounts(false);
+        setTimeout(() => { document.getElementById("rk-pw-input")?.focus(); }, 80);
+      }
+    }
+  };
+
+  // 格式化時間
+  const fmtTime = (iso) => {
+    if (!iso) return "";
+    const diff = Date.now() - new Date(iso);
+    const m = Math.floor(diff/60000), h = Math.floor(diff/3600000), d = Math.floor(diff/86400000);
+    if (m < 1) return "剛剛";
+    if (m < 60) return `${m}分鐘前`;
+    if (h < 24) return `${h}小時前`;
+    if (d < 7)  return `${d}天前`;
+    const dt = new Date(iso); return `${dt.getMonth()+1}/${dt.getDate()}`;
+  };
+
+  // 當前身份是否已有記住我憑證
+  const hasSavedCred = sel && loadCreds()[sel]?.rememberMe;
+
+  return (
+    <div style={{ minHeight:"100vh", background:`linear-gradient(135deg,#f0f4ff 0%,#fafafa 60%,#fff7ed 100%)`, display:"flex", alignItems:"center", justifyContent:"center", padding:24, fontFamily:"'Noto Sans TC',sans-serif" }}>
+      <div style={{ width:"100%", maxWidth:400 }}>
+
+        {/* Logo */}
+        <div style={{ textAlign:"center", marginBottom:24 }}>
+          <div style={{ width:56, height:56, background:`linear-gradient(135deg,${T.accent},#3b82f6)`, borderRadius:16, display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 14px", color:"#fff", boxShadow:`0 8px 24px ${T.accent}44` }}>
+            <Icon n="home" s={26}/>
+          </div>
+          <h1 style={{ fontSize:18, fontWeight:800, color:T.text, margin:0, letterSpacing:"-0.02em" }}>家樂美房產管理顧問有限公司</h1>
+          <p style={{ color:T.textSub, marginTop:6, fontSize:14 }}>多人協作租屋管理平台</p>
+        </div>
+
+        {/* ── 快速帳號列表 ── */}
+        {accounts.length > 0 && showAccounts && (
+          <div style={{ marginBottom:14 }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+              <span style={{ fontSize:13, fontWeight:700, color:T.textSub, letterSpacing:"0.05em" }}>⚡ 快速登入</span>
+              <button onClick={()=>setShowAccounts(false)} style={{ background:"none", border:"none", color:T.textMuted, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>＋ 新帳號</button>
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {accounts.map((acct, i) => {
+                const uk = acct.email || acct.phone;
+                const isRemoving = confirmRemove === uk;
+                const credSaved = loadCreds()[acct.type]?.rememberMe && (loadCreds()[acct.type]?.email === acct.email || loadCreds()[acct.type]?.phone === acct.phone);
+                return (
+                  <div key={i} style={{ background:T.bg, border:`1.5px solid ${T.border}`, borderRadius:14, overflow:"hidden", boxShadow:"0 2px 8px rgba(0,0,0,0.05)" }}
+                    onMouseEnter={e=>{ if(!isRemoving) e.currentTarget.style.borderColor=roleColor[acct.type]+"66"; }}
+                    onMouseLeave={e=>{ e.currentTarget.style.borderColor=T.border; }}>
+                    {isRemoving ? (
+                      <div style={{ display:"flex", alignItems:"center", gap:10, padding:"12px 14px" }}>
+                        <span style={{ flex:1, fontSize:13, color:T.text }}>移除「{acct.name}」的快速登入？</span>
+                        <button onClick={()=>{ dropAccount(uk); setAccounts(loadAccounts()); setConfirmRemove(null); }} style={{ background:T.redBg, color:T.red, border:"none", borderRadius:7, padding:"5px 12px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>移除</button>
+                        <button onClick={()=>setConfirmRemove(null)} style={{ background:T.bgMuted, color:T.textSub, border:"none", borderRadius:7, padding:"5px 10px", fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>取消</button>
+                      </div>
+                    ) : (
+                      <div style={{ display:"flex", alignItems:"center", gap:12, padding:"12px 14px", cursor:"pointer" }}
+                        onClick={()=>{ if(!loading) handleQuickSelect(acct); }}>
+                        {/* Avatar */}
+                        <div style={{ position:"relative", width:42, height:42, flexShrink:0 }}>
+                          <div style={{ width:42, height:42, borderRadius:"50%", background:roleColor[acct.type]+"18", border:`2px solid ${roleColor[acct.type]}44`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:17, fontWeight:700, color:roleColor[acct.type] }}>
+                            {acct.avatar || acct.name[0]}
+                          </div>
+                          {/* 記住我標記 */}
+                          {credSaved && (
+                            <div style={{ position:"absolute", bottom:-1, right:-1, width:14, height:14, borderRadius:"50%", background:T.green, border:`2px solid ${T.bg}`, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                              <span style={{ color:"#fff", fontSize:8, lineHeight:1 }}>✓</span>
+                            </div>
+                          )}
+                        </div>
+                        {/* Info */}
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+                            <span style={{ fontWeight:700, color:T.text, fontSize:14 }}>{acct.name}</span>
+                            <span style={{ fontSize:11, fontWeight:600, background:roleColor[acct.type]+"18", color:roleColor[acct.type], padding:"1px 7px", borderRadius:99 }}>{roleLabel[acct.type]}</span>
+                            {credSaved && <span style={{ fontSize:10, color:T.green, fontWeight:600 }}>記住我 ✓</span>}
+                          </div>
+                          <div style={{ fontSize:12, color:T.textMuted, marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                            {acct.email || acct.phone}
+                            {acct.lastLogin && <span style={{ marginLeft:6 }}>· {fmtTime(acct.lastLogin)}</span>}
+                          </div>
+                        </div>
+                        {/* Right: arrow + remove */}
+                        {loading
+                          ? <div style={{ width:18, height:18, borderRadius:"50%", border:`2px solid ${T.border}`, borderTopColor:T.accent, animation:"spin 0.8s linear infinite", flexShrink:0 }}/>
+                          : <div style={{ display:"flex", alignItems:"center", gap:4, flexShrink:0 }}>
+                              <span style={{ color:T.textMuted, fontSize:20, lineHeight:1 }}>›</span>
+                              <button onClick={e=>{ e.stopPropagation(); setConfirmRemove(uk); }}
+                                style={{ background:"none", border:"none", color:T.textMuted, cursor:"pointer", padding:4, borderRadius:6, fontSize:13, lineHeight:1, fontFamily:"inherit" }} title="移除">✕</button>
+                            </div>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── 登入表單卡片 ── */}
+        <div style={{ background:T.bg, border:`1px solid ${T.border}`, borderRadius:20, padding:24, boxShadow:"0 8px 32px rgba(0,0,0,0.07)" }}>
+
+          {accounts.length > 0 && !showAccounts && (
+            <button onClick={()=>{ setShowAccounts(true); setSel(null); setErr(""); }} style={{ display:"flex", alignItems:"center", gap:5, background:"none", border:"none", color:T.accent, fontSize:13, fontWeight:600, cursor:"pointer", marginBottom:14, padding:0, fontFamily:"inherit" }}>
+              ‹ 回到快速登入
+            </button>
+          )}
+
+          {!sel && <div style={{ textAlign:"center", color:T.textSub, fontSize:14, padding:"12px 0 8px" }}>請選擇您的身份</div>}
+
+          {/* 自動帶入提示 */}
+          {sel && autoFilled && (
+            <div style={{ display:"flex", alignItems:"center", gap:7, background:T.greenBg, border:`1px solid ${T.green}33`, borderRadius:8, padding:"7px 12px", marginBottom:12 }}>
+              <span style={{ color:T.green, fontSize:14 }}>✓</span>
+              <span style={{ fontSize:13, color:T.green, fontWeight:600 }}>已自動帶入上次儲存的登入資訊</span>
+            </div>
+          )}
+
+          {/* 租客：手機號碼 */}
+          {sel === "tenant" && (
+            <>
+              <label style={S.label}>手機號碼</label>
+              <input id="rk-phone-input" style={S.input} type="tel" value={phone}
+                onChange={e=>{ setPhone(e.target.value); setErr(""); setAutoFilled(false); }}
+                placeholder="例：0912-345-678"
+                onKeyDown={e=>e.key==="Enter"&&canSubmit&&doLogin()} autoFocus/>
+            </>
+          )}
+
+          {/* 管理員 / 後台維修：Email + 密碼 */}
+          {(sel === "admin" || sel === "superadmin") && (
+            <>
+              <label style={S.label}>帳號 Email</label>
+              <input style={S.input} type="email" value={email}
+                onChange={e=>{ setEmail(e.target.value); setErr(""); setAutoFilled(false); }}
+                placeholder="your@email.com"
+                onKeyDown={e=>e.key==="Enter"&&canSubmit&&doLogin()} autoFocus/>
+              <label style={S.label}>密碼</label>
+              <input id="rk-pw-input" style={S.input} type="password" value={pw}
+                onChange={e=>{ setPw(e.target.value); setErr(""); setAutoFilled(false); }}
+                placeholder="••••••••"
+                onKeyDown={e=>e.key==="Enter"&&canSubmit&&doLogin()}/>
+            </>
+          )}
+
+          {/* 記住我 checkbox — 選完身份後才顯示 */}
+          {sel && (
+            <div onClick={toggleRemember}
+              style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 12px", marginBottom:12, background:rememberMe[sel]?T.greenBg:T.bgSub, border:`1px solid ${rememberMe[sel]?T.green+"55":T.border}`, borderRadius:9, cursor:"pointer", userSelect:"none", transition:"all 0.15s" }}>
+              {/* 勾選框 */}
+              <div style={{ width:20, height:20, borderRadius:5, border:`2px solid ${rememberMe[sel]?T.green:T.borderMd}`, background:rememberMe[sel]?T.green:T.bg, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, transition:"all 0.15s" }}>
+                {rememberMe[sel] && <span style={{ color:"#fff", fontSize:13, lineHeight:1, fontWeight:700 }}>✓</span>}
+              </div>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:14, fontWeight:600, color:rememberMe[sel]?T.green:T.text }}>記住我的登入資訊</div>
+                <div style={{ fontSize:12, color:T.textSub, marginTop:1 }}>
+                  {rememberMe[sel]
+                    ? `下次選擇此身份時將自動帶入${sel==="tenant"?"手機號碼":"帳號及密碼"}並直接登入`
+                    : `勾選後自動儲存${sel==="tenant"?"手機號碼":"帳號及密碼"}，下次一鍵登入`}
+                </div>
+              </div>
+              {/* 若已儲存過 → 顯示「已儲存」標籤 */}
+              {hasSavedCred && (
+                <span style={{ fontSize:11, color:T.green, fontWeight:700, background:T.greenBg, border:`1px solid ${T.green}44`, borderRadius:99, padding:"2px 8px", flexShrink:0 }}>已儲存</span>
+              )}
+            </div>
+          )}
+
+          {/* 錯誤提示 */}
+          {err && (
+            <div style={{ display:"flex", alignItems:"center", gap:6, background:T.redBg, border:`1px solid ${T.red}33`, borderRadius:8, padding:"8px 12px", marginBottom:12 }}>
+              <span style={{ color:T.red, fontSize:15 }}>⚠</span>
+              <span style={{ color:T.red, fontSize:13, fontWeight:600 }}>{err}</span>
+            </div>
+          )}
+
+          {/* 登入按鈕 */}
+          {sel && (
+            <button onClick={()=>doLogin()} disabled={loading||!canSubmit}
+              style={{ ...S.btn(), width:"100%", justifyContent:"center", padding:"12px", fontSize:15, opacity:(loading||!canSubmit)?0.55:1, marginBottom:0, borderRadius:10, background:loading?T.bgMuted:T.accent }}>
+              {loading
+                ? <><div style={{ width:16, height:16, borderRadius:"50%", border:"2px solid #fff4", borderTopColor:"#fff", animation:"spin 0.7s linear infinite" }}/>&nbsp;登入中...</>
+                : "登入"}
+            </button>
+          )}
+
+          {/* Divider */}
+          <div style={{ display:"flex", alignItems:"center", gap:10, margin: sel ? "18px 0 14px" : "8px 0 14px" }}>
+            <div style={{ flex:1, height:1, background:T.border }}/>
+            <span style={{ color:T.textMuted, fontSize:11, whiteSpace:"nowrap", letterSpacing:"0.06em" }}>選擇登入身份</span>
+            <div style={{ flex:1, height:1, background:T.border }}/>
+          </div>
+
+          {/* 身份選擇按鈕 */}
+          <div style={{ display:"flex", gap:8 }}>
+            {rolesMeta.map(rb => {
+              const active  = sel === rb.key;
+              const hasCred = loadCreds()[rb.key]?.rememberMe;
+              return (
+                <button key={rb.key} onClick={()=>switchRole(rb.key)}
+                  style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:5, padding:"12px 4px", borderRadius:12, cursor:"pointer", border:`2px solid ${active?rb.color:T.border}`, background:active?rb.bg:T.bgSub, color:active?rb.color:T.textSub, fontWeight:active?700:500, fontSize:12, fontFamily:"inherit", transition:"all 0.15s", position:"relative" }}>
+                  <Icon n={rb.icon} s={18}/>
+                  {rb.label}
+                  {/* 記住我小綠點 */}
+                  {hasCred && (
+                    <div style={{ position:"absolute", top:6, right:8, width:7, height:7, borderRadius:"50%", background:T.green, border:`1.5px solid ${active?rb.bg:T.bgSub}` }} title="已儲存記住我"/>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <p style={{ textAlign:"center", color:T.textMuted, fontSize:12, marginTop:14 }}>勾選「記住我」後，下次點擊帳號即可直接登入</p>
+      </div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+//  DASHBOARD
+// ═══════════════════════════════════════════════════════
+function Dashboard({ data, currentUser, onUpdate }) {
+  const { rooms, tenants, bills, repairs, activityLog, users } = data;
+  const role = safeRole(currentUser.role);
+
+  const totalRooms = rooms.length;
+  const rented = rooms.filter(r=>r.status==="rented").length;
+  const occ = totalRooms>0 ? Math.round((rented/totalRooms)*100) : 0;
+  const paidRent   = bills.filter(b=>b.status==="paid"&&b.type==="rent").reduce((s,b)=>s+(b.amount||0),0);
+  const unpaidRent = bills.filter(b=>b.status==="unpaid").reduce((s,b)=>s+(b.amount||0),0);
+  const pendingCnt = repairs.filter(r=>r.status==="pending").length;
+  const expiring   = tenants.filter(t=>t.contractEnd&&!t.isCohabitant&&daysUntil(t.contractEnd)<=60&&daysUntil(t.contractEnd)>0);
+  const renewalAlert = rooms.filter(r=>r.status==="rented").map(r=>{
+    const t = tenants.find(x=>x.id===r.tenantId||x.roomId===r.id);
+    const end = r.contractEnd||t?.contractEnd||"";
+    const days = end ? daysUntil(end) : null;
+    return { ...r, _end:end, _days:days, _name:r.tenantContactName||t?.name||"" };
+  }).filter(r=>r._end&&r._days!==null&&r._days<=45&&r._days>0);
+  const onlineUsers = users.filter(u=>u.online&&u.id!==currentUser.id);
+
+  const doRenew = (room) => {
+    const newEnd = addOneYear(room._end);
+    onUpdate(d=>({ ...d, rooms:d.rooms.map(r=>r.id===room.id?{...r,contractEnd:newEnd,leaseStart:room._end}:r), activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`確認「${room.communityName}」續約至 ${newEnd}`,timestamp:nowISO()}] }));
+  };
+
+  const stats = [
+    { l:"入住率", v:`${occ}%`, sub:`${rented}/${totalRooms} 間`, c:T.blue },
+    role.canViewFinance && { l:"待繳款", v:fmt(unpaidRent), sub:`${bills.filter(b=>b.status==="unpaid").length} 筆`, c:T.red },
+    role.canViewFinance && { l:"已收租金", v:fmt(paidRent), sub:"本月", c:T.green },
+    { l:"待處理報修", v:pendingCnt, sub:"件", c:T.amber },
+  ].filter(Boolean);
+
+  return (
+    <div>
+      <div style={{ marginBottom:20 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:4 }}>
+          <h2 style={{ ...S.title, marginBottom:0 }}>總覽</h2>
+          {onlineUsers.length>0 && <div style={{ display:"flex", alignItems:"center", gap:5, background:T.greenBg, border:`1px solid ${T.green}33`, borderRadius:99, padding:"3px 10px" }}>
+            <div style={{ width:6, height:6, borderRadius:"50%", background:T.green, animation:"pulse 2s infinite" }}/><span style={{ fontSize:12, color:T.green, fontWeight:600 }}>{onlineUsers.length} 人在線</span>
+          </div>}
+        </div>
+        <p style={{ color:T.textSub, fontSize:14, margin:0 }}>歡迎回來，{currentUser.name} · <span style={{ color:role.color, fontWeight:600 }}>{role.label}</span></p>
+      </div>
+
+      {renewalAlert.length>0 && (
+        <div style={{ background:T.redBg, border:`2px solid ${T.red}`, borderRadius:12, padding:"14px 16px", marginBottom:16 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+            <span style={{ fontSize:18 }}>🔔</span>
+            <span style={{ fontSize:15, fontWeight:800, color:T.red }}>是否確認續約</span>
+            <span style={{ marginLeft:"auto", background:T.red, color:"#fff", borderRadius:99, fontSize:12, fontWeight:700, padding:"2px 9px" }}>{renewalAlert.length} 間</span>
+          </div>
+          {renewalAlert.map(r=>(
+            <div key={r.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 0", borderTop:`1px solid ${T.red}33` }}>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:14, fontWeight:700, color:T.red }}>{r.communityName}</div>
+                {r._name && <div style={{ fontSize:12, color:T.red, opacity:0.8, marginTop:2 }}>租客：{r._name}</div>}
+                <div style={{ fontSize:11, color:T.red, opacity:0.7, marginTop:2 }}>到期：{toROC(r._end)}　剩 <strong>{r._days}</strong> 天</div>
+              </div>
+              <button onClick={()=>doRenew(r)} style={{ flexShrink:0, background:T.red, color:"#fff", border:"none", borderRadius:8, padding:"7px 13px", fontSize:13, fontWeight:700, cursor:"pointer" }}>✅ 續約完畢</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:14 }}>
+        {stats.map((s,i)=>(
+          <div key={i} style={S.card}>
+            <div style={{ fontSize:11, color:T.textSub, fontWeight:700, letterSpacing:"0.07em", marginBottom:8 }}>{s.l.toUpperCase()}</div>
+            <div style={{ fontSize:22, fontWeight:800, color:s.c }}>{s.v}</div>
+            <div style={{ fontSize:12, color:T.textMuted, marginTop:2 }}>{s.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ ...S.card, marginBottom:12 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
+          <span style={{ color:T.textSub, fontSize:13, fontWeight:600 }}>房間入住狀況</span>
+          <span style={{ color:T.blue, fontWeight:700, fontSize:13 }}>{occ}%</span>
+        </div>
+        <div style={{ background:T.bgMuted, borderRadius:99, height:6, overflow:"hidden", marginBottom:10 }}>
+          <div style={{ width:`${occ}%`, height:"100%", background:`linear-gradient(90deg,${T.blue},${T.accent})`, borderRadius:99, transition:"width 0.8s ease" }}/>
+        </div>
+        <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
+          {rooms.map(r=><div key={r.id} title={r.communityName} style={{ height:6, width:24, borderRadius:3, background:r.status==="rented"?T.blue:T.bgMuted, border:`1px solid ${T.border}` }}/>)}
+        </div>
+      </div>
+
+      {(expiring.length>0||pendingCnt>0) && (
+        <div style={{ ...S.card, marginBottom:12 }}>
+          <div style={{ fontSize:13, color:T.amber, fontWeight:700, marginBottom:12 }}>⚠ 待辦事項</div>
+          {expiring.map(t=>(
+            <div key={t.id} style={{ display:"flex", gap:10, alignItems:"center", padding:"8px 0", borderBottom:`1px solid ${T.border}` }}>
+              <div style={{ width:6, height:6, borderRadius:"50%", background:T.amber, flexShrink:0 }}/>
+              <div><div style={{ color:T.text, fontSize:14 }}>{t.name} 合約即將到期</div><div style={{ color:T.textSub, fontSize:12 }}>剩 {daysUntil(t.contractEnd)} 天</div></div>
+            </div>
+          ))}
+          {pendingCnt>0 && <div style={{ display:"flex", gap:10, alignItems:"center", paddingTop:8 }}><div style={{ width:6, height:6, borderRadius:"50%", background:T.red }}/><div style={{ color:T.text, fontSize:14 }}>{pendingCnt} 件報修待處理</div></div>}
+        </div>
+      )}
+
+      <div style={S.card}>
+        <div style={{ fontSize:13, color:T.textSub, fontWeight:700, marginBottom:12 }}>最近動態</div>
+        {[...activityLog].reverse().slice(0,5).map(log=>{
+          const u = users.find(u=>u.id===log.userId);
+          const lr = u?safeRole(u.role):null;
+          return (
+            <div key={log.id} style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"8px 0", borderBottom:`1px solid ${T.border}` }}>
+              {u?<AvatarBadge user={u} size={28}/>:<div style={{ width:28, height:28, borderRadius:"50%", background:T.bgMuted }}/>}
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:13, color:T.text }}><span style={{ color:lr?lr.color:T.textSub, fontWeight:600 }}>{u?.name||"系統"}</span> {log.action}</div>
+                <div style={{ fontSize:12, color:T.textMuted, marginTop:2 }}>{toROC(log.timestamp,true)}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+//  PAYMENT RECORDS — 匯款截圖記錄元件
+//  結構：room.paymentRecords = [{ id, month, uploadedBy, uploadedAt, note, image }]
+// ═══════════════════════════════════════════════════════
+function PaymentRecords({ room, currentUser, isViewer, onUpdate, onViewPhoto }) {
+  const records     = (room.paymentRecords || []).sort((a, b) => b.month.localeCompare(a.month));
+  const thisMonth   = new Date().toISOString().slice(0, 7);
+  const uploadRef   = useRef(null);
+  const [uploading, setUploading]   = useState(false);
+  const [noteInput, setNoteInput]   = useState("");
+  const [showUpload, setShowUpload] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(thisMonth);
+  const [viewConfirmDel, setViewConfirmDel] = useState(null); // record id to delete
+
+  // 產生近 12 個月選單
+  const monthOptions = Array.from({ length: 18 }, (_, i) => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - i);
+    return d.toISOString().slice(0, 7);
+  });
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploading(true);
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const newRecord = {
+        id:          uid(),
+        month:       selectedMonth,
+        image:       ev.target.result,
+        note:        noteInput.trim(),
+        uploadedBy:  currentUser.id,
+        uploaderName:currentUser.name,
+        uploadedAt:  nowISO(),
+      };
+      onUpdate(d => ({
+        ...d,
+        rooms: d.rooms.map(r => r.id === room.id
+          ? { ...r, paymentRecords: [...(r.paymentRecords || []), newRecord] }
+          : r),
+        activityLog: [...d.activityLog, {
+          id: uid(), userId: currentUser.id,
+          action: `上傳「${room.communityName}」${toROCMonth(selectedMonth)} 匯款截圖`,
+          timestamp: nowISO(),
+        }],
+      }));
+      setUploading(false);
+      setShowUpload(false);
+      setNoteInput("");
+      e.target.value = "";
+    };
+    reader.onerror = () => setUploading(false);
+    reader.readAsDataURL(file);
+  };
+
+  const deleteRecord = (recId) => {
+    const rec = records.find(r => r.id === recId);
+    onUpdate(d => ({
+      ...d,
+      rooms: d.rooms.map(r => r.id === room.id
+        ? { ...r, paymentRecords: (r.paymentRecords || []).filter(p => p.id !== recId) }
+        : r),
+      activityLog: [...d.activityLog, {
+        id: uid(), userId: currentUser.id,
+        action: `刪除「${room.communityName}」${toROCMonth(rec?.month)} 匯款截圖`,
+        timestamp: nowISO(),
+      }],
+    }));
+    setViewConfirmDel(null);
+  };
+
+  // 可刪除：superadmin 可刪全部；租客只能刪自己上傳的
+  const canDelete = (rec) =>
+    currentUser.role === "superadmin" ||
+    (isViewer && rec.uploadedBy === currentUser.id);
+
+  return (
+    <div style={{ marginBottom: 12, border: `1px solid ${T.border}`, borderRadius: 10, overflow: "hidden" }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: T.bgSub, borderBottom: records.length > 0 ? `1px solid ${T.border}` : "none" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+          <span style={{ fontSize: 14 }}>💳</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: T.text }}>匯款截圖記錄</span>
+          {records.length > 0 && (
+            <span style={{ background: T.accent, color: "#fff", fontSize: 11, fontWeight: 700, borderRadius: 99, padding: "1px 7px" }}>{records.length} 筆</span>
+          )}
+        </div>
+        {/* 租客可上傳；管理員/後台也可以代為上傳 */}
+        {(isViewer || currentUser.role === "admin" || currentUser.role === "superadmin") && (
+          <button
+            onClick={() => setShowUpload(v => !v)}
+            style={{ background: showUpload ? T.bgMuted : T.accentBg, color: T.accent, border: `1px solid ${T.accent}44`, borderRadius: 7, padding: "4px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+            {showUpload ? "取消" : "＋ 上傳"}
+          </button>
+        )}
+      </div>
+
+      {/* 上傳表單 */}
+      {showUpload && (
+        <div style={{ padding: "12px 14px", background: T.accentBg, borderBottom: `1px solid ${T.accent}22` }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ ...S.label, marginBottom: 3 }}>匯款月份</label>
+              <select
+                value={selectedMonth}
+                onChange={e => setSelectedMonth(e.target.value)}
+                style={{ ...S.input, marginBottom: 0, fontSize: 13, padding: "7px 10px" }}>
+                {monthOptions.map(m => (
+                  <option key={m} value={m}>{toROCMonth(m)}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <label style={{ ...S.label, marginBottom: 3 }}>備註（選填）</label>
+          <input
+            style={{ ...S.input, marginBottom: 8, fontSize: 13, padding: "7px 10px" }}
+            value={noteInput}
+            onChange={e => setNoteInput(e.target.value)}
+            placeholder="例：4月租金 NT$16,000"
+          />
+          <input
+            ref={uploadRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            style={{ display: "none" }}
+            onChange={handleFileChange}
+          />
+          <button
+            onClick={() => uploadRef.current?.click()}
+            disabled={uploading}
+            style={{ width: "100%", background: T.accent, color: "#fff", border: "none", borderRadius: 8, padding: "10px", fontSize: 14, fontWeight: 700, cursor: uploading ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: uploading ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+            {uploading
+              ? <><div style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid #fff4", borderTopColor: "#fff", animation: "spin 0.7s linear infinite" }}/> 上傳中...</>
+              : "📷 選擇截圖上傳"}
+          </button>
+        </div>
+      )}
+
+      {/* 記錄列表 */}
+      {records.length === 0 ? (
+        <div style={{ padding: "20px 14px", textAlign: "center", color: T.textMuted, fontSize: 13 }}>
+          尚無匯款截圖記錄
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {records.map((rec, idx) => (
+            <div key={rec.id} style={{ padding: "11px 14px", borderBottom: idx < records.length - 1 ? `1px solid ${T.border}` : "none", background: T.bg }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {/* 縮圖 */}
+                <div
+                  onClick={() => onViewPhoto(rec.image)}
+                  style={{ width: 52, height: 52, borderRadius: 8, overflow: "hidden", border: `1px solid ${T.border}`, cursor: "pointer", flexShrink: 0, background: T.bgMuted }}>
+                  <img src={rec.image} alt="匯款截圖" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                </div>
+                {/* 資訊 */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{toROCMonth(rec.month)}</span>
+                    <span style={{ fontSize: 11, color: T.green, fontWeight: 600, background: T.greenBg, border: `1px solid ${T.green}33`, borderRadius: 99, padding: "1px 7px" }}>✓ 已上傳</span>
+                  </div>
+                  {rec.note && <div style={{ fontSize: 12, color: T.textSub, marginTop: 2 }}>{rec.note}</div>}
+                  <div style={{ fontSize: 11, color: T.textMuted, marginTop: 2 }}>
+                    {rec.uploaderName} · {toROC(rec.uploadedAt, true)}
+                  </div>
+                </div>
+                {/* 操作 */}
+                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                  <button
+                    onClick={() => onViewPhoto(rec.image)}
+                    style={{ background: T.bgMuted, color: T.textSub, border: `1px solid ${T.border}`, borderRadius: 6, padding: "5px 9px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                    放大
+                  </button>
+                  {canDelete(rec) && (
+                    <button
+                      onClick={() => setViewConfirmDel(rec.id)}
+                      style={{ background: T.redBg, color: T.red, border: `1px solid ${T.red}33`, borderRadius: 6, padding: "5px 9px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
+                      刪除
+                    </button>
+                  )}
+                </div>
+              </div>
+              {/* 確認刪除 inline */}
+              {viewConfirmDel === rec.id && (
+                <div style={{ marginTop: 8, background: T.redBg, border: `1px solid ${T.red}33`, borderRadius: 8, padding: "9px 12px", display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ flex: 1, fontSize: 13, color: T.red, fontWeight: 600 }}>確定刪除此截圖？</span>
+                  <button onClick={() => deleteRecord(rec.id)} style={{ background: T.red, color: "#fff", border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>刪除</button>
+                  <button onClick={() => setViewConfirmDel(null)} style={{ background: T.bgMuted, color: T.textSub, border: "none", borderRadius: 6, padding: "5px 10px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>取消</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+//  ROOMS
+// ═══════════════════════════════════════════════════════
+function Rooms({ data, currentUser, onUpdate }) {
+  const { rooms, tenants, bills } = data;
+  const role       = safeRole(currentUser.role);
+  const isSA       = currentUser.role === "superadmin";
+  const isAdmin    = currentUser.role === "admin";
+  // ── 權限規則 ──────────────────────────────────────────
+  // canEditRoom : superadmin + admin 都可以新增 / 編輯房源
+  // canDeleteRoom: 只有 superadmin 可以刪除房源
+  const canEditRoom   = isSA || isAdmin;
+  const canDeleteRoom = isSA;
+  const isViewer   = currentUser.role === "viewer";
+  const viewerRoomId = isViewer ? (currentUser._roomId || "") : "";
+  const todayDay   = new Date().getDate();
+  const thisMonthStr = () => new Date().toISOString().slice(0, 7);
+
+  const isRentDue = (room) => {
+    if (room.status !== "rented") return false;
+    if (todayDay < parseInt(room.rentDay || "5")) return false;
+    return !(bills || []).some(b => b.roomId === room.id && b.month === thisMonthStr() && b.status === "paid");
+  };
+
+  const markPaid = (room) => {
+    const month = thisMonthStr();
+    const t = (tenants || []).find(t => t.linkedRoom === room.id && !t.isCohabitant)
+           || (tenants || []).find(t => t.roomId === room.id && !t.isCohabitant)
+           || (tenants || []).find(t => t.roomId === room.id);
+    onUpdate(d => {
+      const ex = d.bills.find(b => b.roomId === room.id && b.month === month);
+      const nb = ex
+        ? d.bills.map(b => b.id === ex.id ? { ...b, status:"paid", paidDate:todayStr(), recordedBy:currentUser.id } : b)
+        : [...d.bills, { id:uid(), tenantId:t?.id||room.tenantId||"", roomId:room.id, type:"rent", amount:room.rent, month, status:"paid", paidDate:todayStr(), recordedBy:currentUser.id }];
+      return { ...d, bills:nb, activityLog:[...d.activityLog, { id:uid(), userId:currentUser.id, action:`標記「${room.communityName}」${month} 月租金已繳`, timestamp:nowISO() }] };
     });
+  };
+
+  const [expanded, setExpanded] = useState(() => { const s = new Set(); if (isViewer && viewerRoomId) s.add(viewerRoomId); return s; });
+  const toggle = (id) => setExpanded(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const emptyForm = () => { const t = todayStr(); return { communityName:"", address:"", ownerName:"", salesRep:"", rentDay:"5", rent:"", leaseStart:t, contractEnd:addOneYear(t), tenantContactName:"", tenantContactPhone:"", cohabitants:[], renewals:[], contractPhoto:"", ownerBankPhoto:"", autoRentRemind:false }; };
+  const [showAdd, setShowAdd]     = useState(false);
+  const [editRoom, setEditRoom]   = useState(null);
+  const [form, setForm]           = useState(emptyForm);
+  const [showRenew, setShowRenew] = useState(false);
+  const [confirmDel, setConfirmDel]   = useState(null);
+  const [viewPhoto, setViewPhoto]     = useState(null);
+  const [openChat, setOpenChat]       = useState(null);
+  const [chatInput, setChatInput]     = useState({});
+  const [editTpl, setEditTpl]         = useState(false);
+  const [tplDraft, setTplDraft]       = useState(null);
+  const fileRef = useRef(null);
+  const bankRef = useRef(null);
+  const sf = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const openEdit = (room) => {
+    setForm({ communityName:room.communityName||"", address:room.address||"", ownerName:room.ownerName||"", salesRep:room.salesRep||"", rentDay:room.rentDay||"5", rent:room.rent||"", leaseStart:room.leaseStart||"", contractEnd:room.contractEnd||"", tenantContactName:room.tenantContactName||"", tenantContactPhone:room.tenantContactPhone||"", cohabitants:(room.cohabitants||[]).map(c=>({name:c.name||"",phone:c.phone||""})), renewals:(room.renewals||[]).map(r=>({renewStart:r.renewStart||"",renewEnd:r.renewEnd||""})), contractPhoto:room.contractPhoto||"", ownerBankPhoto:room.ownerBankPhoto||"", autoRentRemind:room.autoRentRemind||false });
+    setShowRenew((room.renewals || []).length > 0);
+    setEditRoom(room); setShowAdd(true);
+  };
+
+  // ── 儲存房源：產生詳細的 diff 記錄 ───────────────────
+  const saveRoom = () => {
+    if (!form.communityName || !form.rent) return;
+    const rid = editRoom ? editRoom.id : uid();
+    onUpdate(d => {
+      let nr = editRoom
+        ? d.rooms.map(r => r.id === editRoom.id ? { ...r, ...form, rent:parseInt(form.rent) } : r)
+        : [...d.rooms, { id:rid, status:"vacant", tenantId:null, propId:"p1", ...form, rent:parseInt(form.rent) }];
+
+      let nt = d.tenants.filter(t => t.linkedRoom !== rid);
+      let mainId = null;
+      if (form.tenantContactName) {
+        const ex = d.tenants.find(t => t.linkedRoom === rid && !t.isCohabitant);
+        mainId = ex ? ex.id : uid();
+        nt = [...nt, { id:mainId, name:form.tenantContactName, phone:form.tenantContactPhone||"", email:ex?.email||"", roomId:rid, moveIn:ex?.moveIn||"", contractEnd:form.contractEnd||"", deposit:ex?.deposit||0, linkedRoom:rid, isCohabitant:false }];
+        nr = nr.map(r => r.id === rid ? { ...r, status:"rented", tenantId:mainId } : r);
+        (form.cohabitants || []).forEach((c, i) => {
+          if (c.name) {
+            const ec = d.tenants.find(t => t.linkedRoom === rid && t.isCohabitant && t.cohabitantIndex === i);
+            nt = [...nt, { id:ec?ec.id:uid(), name:c.name, phone:c.phone||"", email:ec?.email||"", roomId:rid, moveIn:"", contractEnd:form.contractEnd||"", deposit:0, linkedRoom:rid, isCohabitant:true, cohabitantIndex:i }];
+          }
+        });
+      } else {
+        nr = nr.map(r => r.id === rid ? { ...r, status:"vacant", tenantId:null } : r);
+      }
+
+      let nb = d.bills;
+      if (!editRoom && mainId) {
+        const mo = new Date().toISOString().slice(0, 7);
+        if (!nb.find(b => b.roomId === rid && b.month === mo))
+          nb = [...nb, { id:uid(), tenantId:mainId, roomId:rid, type:"rent", amount:parseInt(form.rent), month:mo, status:"unpaid", paidDate:null, recordedBy:null }];
+      }
+
+      // ── 產生詳細 diff 記錄 ───────────────────────────
+      let logAction;
+      if (!editRoom) {
+        // 新增：記錄所有填寫的主要欄位
+        const details = [
+          form.communityName && `房源名稱：${form.communityName}`,
+          form.rent          && `月租金：${fmt(form.rent)}`,
+          form.rentDay       && `繳租日：每月 ${form.rentDay} 號`,
+          form.leaseStart    && `起租日：${toROC(form.leaseStart)}`,
+          form.contractEnd   && `到期日：${toROC(form.contractEnd)}`,
+          form.tenantContactName && `主租客：${form.tenantContactName}`,
+          form.ownerName     && `屋主：${form.ownerName}`,
+          form.salesRep      && `業務：${form.salesRep}`,
+        ].filter(Boolean).join("、");
+        logAction = `【新增房源】「${form.communityName}」（${details}）`;
+      } else {
+        // 編輯：比對與原始資料的差異
+        const prev = d.rooms.find(r => r.id === editRoom.id) || editRoom;
+        const diffs = [];
+        const checkField = (key, label, formatFn) => {
+          const oldVal = prev[key] != null ? String(prev[key]) : "";
+          const newVal = form[key]  != null ? String(form[key]) : "";
+          if (oldVal !== newVal) {
+            const fmtOld = formatFn ? formatFn(oldVal) : (oldVal || "（空）");
+            const fmtNew = formatFn ? formatFn(newVal) : (newVal || "（空）");
+            diffs.push(`${label}：${fmtOld} → ${fmtNew}`);
+          }
+        };
+        checkField("communityName",      "名稱");
+        checkField("address",            "地址");
+        checkField("ownerName",          "屋主");
+        checkField("salesRep",           "業務");
+        checkField("rent",               "月租金", v => v ? fmt(v) : "（空）");
+        checkField("rentDay",            "繳租日", v => v ? `每月 ${v} 號` : "（空）");
+        checkField("leaseStart",         "起租日", v => toROC(v) || "（空）");
+        checkField("contractEnd",        "到期日", v => toROC(v) || "（空）");
+        checkField("tenantContactName",  "主租客");
+        checkField("tenantContactPhone", "主租客電話");
+        const oldAutoRemind = prev.autoRentRemind ? "開啟" : "關閉";
+        const newAutoRemind = form.autoRentRemind ? "開啟" : "關閉";
+        if (oldAutoRemind !== newAutoRemind) diffs.push(`自動提醒：${oldAutoRemind} → ${newAutoRemind}`);
+        const oldRenewals = (prev.renewals || []).length;
+        const newRenewals = (form.renewals || []).length;
+        if (oldRenewals !== newRenewals) diffs.push(`續約記錄：${oldRenewals} 筆 → ${newRenewals} 筆`);
+
+        logAction = diffs.length > 0
+          ? `【修改房源】「${form.communityName}」變更：${diffs.join("；")}`
+          : `【修改房源】「${form.communityName}」（無欄位異動，僅重新儲存）`;
+      }
+
+      return { ...d, rooms:nr, tenants:nt, bills:nb, activityLog:[...d.activityLog, { id:uid(), userId:currentUser.id, action:logAction, timestamp:nowISO() }] };
+    });
+    setShowAdd(false); setEditRoom(null);
+  };
+
+  // ── 刪除：只有 superadmin 才能執行 ───────────────────
+  const deleteRoom = (room) => {
+    if (!canDeleteRoom) return; // 防呆
+    onUpdate(d => ({
+      ...d,
+      rooms: d.rooms.filter(r => r.id !== room.id),
+      tenants: d.tenants.filter(t => t.linkedRoom !== room.id),
+      activityLog: [...d.activityLog, { id:uid(), userId:currentUser.id, action:`【刪除房源】「${room.communityName}」（月租金 ${fmt(room.rent)}，狀態：${room.status === "rented" ? "出租中" : "空房"}）`, timestamp:nowISO() }],
+    }));
+    setConfirmDel(null);
+  };
+
+  // ── Chat View ──
+  if (openChat) {
+    const room = rooms.find(r=>r.id===openChat);
+    if (!room) { setOpenChat(null); return null; }
+    const msgs = room.messages||[];
+    const text = chatInput[openChat]||"";
+    const tpls = data.chatTemplates||["","","",""];
+    const draft = tplDraft??tpls;
+    const doSend = (ov) => {
+      const t=(ov??text).trim(); if(!t) return;
+      const msg={id:uid(),userId:currentUser.id,userName:currentUser.name,userRole:currentUser.role,text:t,timestamp:nowISO()};
+      onUpdate(d=>({...d,rooms:d.rooms.map(r=>r.id===openChat?{...r,messages:[...(r.messages||[]),msg]}:r)}));
+      if(!ov) setChatInput(c=>({...c,[openChat]:""}));
+    };
+    const saveTpl = () => { onUpdate(d=>({...d,chatTemplates:draft})); setEditTpl(false); setTplDraft(null); };
+    return (
+      <div style={{ display:"flex", flexDirection:"column", height:"calc(100vh - 130px)" }}>
+        <div style={{ display:"flex", alignItems:"center", gap:12, padding:"0 0 12px", borderBottom:`1px solid ${T.border}`, marginBottom:12, flexShrink:0 }}>
+          <button onClick={()=>setOpenChat(null)} style={{ background:T.bgMuted, border:"none", borderRadius:7, color:T.textSub, padding:"6px 12px", fontSize:14, cursor:"pointer", fontWeight:600, fontFamily:"inherit" }}>‹ 返回</button>
+          <div style={{ flex:1 }}><div style={{ fontWeight:700, color:T.text, fontSize:15 }}>{room.communityName}</div>{room.address&&<div style={{ fontSize:13, color:T.textSub }}>📍 {room.address}</div>}</div>
+          <span style={{ fontSize:13, color:T.textSub }}>{msgs.length} 則訊息</span>
+        </div>
+        <div style={{ flex:1, overflowY:"auto", display:"flex", flexDirection:"column", gap:10, paddingBottom:8 }}>
+          {msgs.length===0 ? <div style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", color:T.textSub, gap:8 }}><div style={{ fontSize:32 }}>💬</div><div style={{ fontSize:14, fontWeight:600 }}>尚無對話</div></div>
+            : msgs.map((m,i)=>{
+              const isMe=m.userId===currentUser.id, isSys=m.isSystem;
+              const mr=safeRole(m.userRole);
+              const showD=i===0||new Date(m.timestamp).toDateString()!==new Date(msgs[i-1].timestamp).toDateString();
+              return <div key={m.id}>
+                {showD&&<div style={{ textAlign:"center", marginBottom:8 }}><span style={{ background:T.bgMuted, color:T.textSub, fontSize:12, fontWeight:600, padding:"2px 10px", borderRadius:99 }}>{new Date(m.timestamp).getMonth()+1}月{new Date(m.timestamp).getDate()}日</span></div>}
+                {isSys ? <div style={{ display:"flex", justifyContent:"center", margin:"4px 0" }}><div style={{ background:T.amberBg, border:`1px solid ${T.amber}44`, borderRadius:10, padding:"10px 14px", maxWidth:"88%", fontSize:13, color:T.text, lineHeight:1.6 }}><div style={{ fontSize:11, color:T.amber, fontWeight:700, marginBottom:4 }}>🔔 系統自動提醒</div>{m.text}</div></div>
+                  : <div style={{ display:"flex", flexDirection:isMe?"row-reverse":"row", alignItems:"flex-end", gap:8 }}>
+                    <div style={{ width:28, height:28, borderRadius:"50%", background:mr.color+"22", border:`1px solid ${mr.color}44`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:700, color:mr.color, flexShrink:0 }}>{m.userName?.[0]||"?"}</div>
+                    <div style={{ maxWidth:"75%", display:"flex", flexDirection:"column", alignItems:isMe?"flex-end":"flex-start", gap:3 }}>
+                      <div style={{ fontSize:12, color:T.textSub, display:"flex", gap:5 }}>{!isMe&&<span style={{ color:mr.color, fontWeight:600 }}>{m.userName}</span>}<span>{new Date(m.timestamp).toLocaleTimeString("zh-TW",{hour:"2-digit",minute:"2-digit"})}</span></div>
+                      <div style={{ background:isMe?T.accent:T.bgMuted, color:isMe?"#fff":T.text, border:isMe?"none":`1px solid ${T.border}`, borderRadius:isMe?"14px 14px 4px 14px":"14px 14px 14px 4px", padding:"9px 14px", fontSize:14, lineHeight:1.5, wordBreak:"break-word" }}>{m.text}</div>
+                    </div>
+                  </div>}
+              </div>;
+            })}
+        </div>
+        {/* 快速範本：租客身份不顯示 */}
+        {!isViewer && (
+          <div style={{ borderTop:`1px solid ${T.border}`, paddingTop:10, flexShrink:0 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:7 }}>
+              <span style={{ fontSize:11, color:T.textMuted, fontWeight:700 }}>⚡ 快速範本</span>
+              {role.canEdit && (editTpl
+                ? <div style={{ display:"flex", gap:6 }}><button onClick={saveTpl} style={{ background:T.green, color:"#fff", border:"none", borderRadius:6, padding:"3px 10px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>儲存</button><button onClick={()=>{setTplDraft(null);setEditTpl(false);}} style={{ background:T.bgMuted, color:T.textSub, border:"none", borderRadius:6, padding:"3px 10px", fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>取消</button></div>
+                : <button onClick={()=>{setTplDraft([...tpls]);setEditTpl(true);}} style={{ background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:6, padding:"3px 10px", fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>✎ 編輯</button>)}
+            </div>
+            {editTpl ? <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:10 }}>{draft.map((t,i)=><div key={i} style={{ display:"flex", gap:6 }}><span style={{ fontSize:12, color:T.textMuted, width:18, textAlign:"right" }}>{i+1}.</span><input style={{ flex:1, background:T.bg, border:`1px solid ${T.borderMd}`, borderRadius:7, color:T.text, padding:"7px 10px", fontSize:13, outline:"none", fontFamily:"inherit" }} value={t} placeholder={`範本 ${i+1}`} onChange={e=>setTplDraft(p=>(p??tpls).map((v,j)=>j===i?e.target.value:v))}/></div>)}</div>
+              : <div style={{ display:"flex", gap:7, overflowX:"auto", paddingBottom:8 }}>{tpls.map((t,i)=>t.trim()?<button key={i} onClick={()=>doSend(t)} style={{ flexShrink:0, maxWidth:200, background:T.bgSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"6px 12px", fontSize:12, color:T.text, cursor:"pointer", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", fontFamily:"inherit" }} title={t}>{t.length>22?t.slice(0,22)+"…":t}</button>:null)}</div>}
+          </div>
+        )}
+        <div style={{ display:"flex", gap:8, paddingTop:6, flexShrink:0 }}>
+          <input style={{ flex:1, background:T.bgMuted, border:`1px solid ${T.border}`, borderRadius:10, color:T.text, padding:"10px 14px", fontSize:14, outline:"none", fontFamily:"inherit" }} placeholder="輸入訊息…" value={text} onChange={e=>setChatInput(c=>({...c,[openChat]:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&doSend()}/>
+          <button onClick={()=>doSend()} style={{ background:text.trim()?T.accent:T.bgMuted, color:text.trim()?"#fff":T.textSub, border:"none", borderRadius:10, padding:"10px 18px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>送出</button>
+        </div>
+      </div>
+    );
+  }
+
+  const visibleRooms = rooms.filter(r=>isViewer?r.id===viewerRoomId:true).sort((a,b)=>(isRentDue(a)?0:1)-(isRentDue(b)?0:1));
+
+  return (
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+        <h2 style={S.title}>房源管理</h2>
+        {canEditRoom && <button onClick={()=>{setForm(emptyForm());setEditRoom(null);setShowAdd(true);setShowRenew(false);}} style={S.btn()}><Icon n="plus" s={13}/> 新增房源</button>}
+      </div>
+      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+        {visibleRooms.map(room=>{
+          const dl = room.contractEnd?daysUntil(room.contractEnd):null;
+          const near = dl!==null&&dl<=60&&dl>0;
+          const due  = isRentDue(room);
+          const open = expanded.has(room.id);
+          const bc   = due?T.red:(near?T.amber+"99":T.border);
+          return (
+            <div key={room.id} style={{ borderRadius:12, border:`${due?2:1}px solid ${bc}`, overflow:"hidden", background:T.bg }}>
+              <div onClick={()=>toggle(room.id)} style={{ display:"flex", alignItems:"center", gap:10, padding:"13px 16px", cursor:"pointer", background:due?T.redBg:(near?T.amberBg:T.bg), userSelect:"none" }}>
+                <div style={{ width:9, height:9, borderRadius:"50%", flexShrink:0, background:due?T.red:(room.status==="rented"?T.green:T.amber) }}/>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontWeight:700, color:T.text, fontSize:15, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{room.communityName}</div>
+                  {!open && <div style={{ fontSize:12, color:T.textSub, marginTop:1, display:"flex", gap:8 }}>{room.rent&&<span>{fmt(room.rent)}/月</span>}{room.tenantContactName&&<span>· {room.tenantContactName}</span>}{due&&<span style={{ color:T.red, fontWeight:700 }}>· ⚠️ 待繳租</span>}{near&&!due&&<span style={{ color:T.amber, fontWeight:700 }}>· 即將到期</span>}</div>}
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
+                  {due&&role.canEdit&&<button onClick={e=>{e.stopPropagation();markPaid(room);}} style={{ background:T.green, color:"#fff", border:"none", borderRadius:7, padding:"5px 11px", fontSize:12, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap", fontFamily:"inherit" }}>已繳租完畢</button>}
+                  <span style={S.tag(room.status==="rented"?T.green:T.amber)}>{SL[room.status]}</span>
+                  <span style={{ color:T.textMuted, fontSize:11, transition:"transform 0.2s", transform:open?"rotate(180deg)":"rotate(0deg)", display:"inline-block" }}>▼</span>
+                </div>
+              </div>
+              {open && (
+                <div style={{ borderTop:`1px solid ${T.border}`, padding:"14px 16px" }}>
+                  {due && <div style={{ background:T.redBg, border:`1px solid ${T.red}55`, borderRadius:8, padding:"10px 12px", marginBottom:12, display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
+                    <div style={{ color:T.red, fontWeight:700, fontSize:13 }}>⚠️ 本月租金待繳（每月 {room.rentDay} 號繳租）</div>
+                    {role.canEdit&&<button onClick={e=>{e.stopPropagation();markPaid(room);}} style={{ background:T.green, color:"#fff", border:"none", borderRadius:7, padding:"6px 14px", fontSize:13, fontWeight:700, cursor:"pointer", flexShrink:0, fontFamily:"inherit" }}>已繳租完畢</button>}
+                  </div>}
+                  {room.address&&<div style={{ fontSize:13, color:T.textSub, marginBottom:8 }}>📍 {room.address}</div>}
+                  {(currentUser.role==="superadmin"||currentUser.role==="admin") && (room.tenantContactName||(room.cohabitants||[]).length>0) && (
+                    <div style={{ background:T.bgSub, borderRadius:8, padding:"10px 12px", marginBottom:10, border:`1px solid ${T.border}` }}>
+                      <div style={{ fontSize:12, color:T.textSub, fontWeight:700, marginBottom:8 }}>👥 租客聯絡資訊</div>
+                      {room.tenantContactName&&<div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:(room.cohabitants||[]).length>0?8:0 }}>
+                        <div><div style={{ display:"flex", alignItems:"center", gap:6 }}><span style={{ fontSize:14, fontWeight:700, color:T.text }}>{room.tenantContactName}</span><span style={S.tag(T.blue)}>主租客</span></div>{room.tenantContactPhone&&<div style={{ fontSize:13, color:T.textSub, marginTop:2 }}>📞 {room.tenantContactPhone}</div>}</div>
+                        {room.tenantContactPhone&&<a href={`tel:${room.tenantContactPhone}`} style={{ background:T.greenBg, color:T.green, border:`1px solid ${T.green}44`, borderRadius:7, padding:"5px 10px", fontSize:13, fontWeight:600, textDecoration:"none" }}>📞</a>}
+                      </div>}
+                      {(room.cohabitants||[]).map((c,i)=><div key={i} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:6 }}><div><div style={{ fontSize:13, fontWeight:600, color:T.textSub }}>{c.name} <span style={S.tag(T.textMuted)}>同住人</span></div>{c.phone&&<div style={{ fontSize:12, color:T.textSub }}>📞 {c.phone}</div>}</div>{c.phone&&<a href={`tel:${c.phone}`} style={{ background:T.greenBg, color:T.green, border:`1px solid ${T.green}44`, borderRadius:7, padding:"4px 9px", fontSize:13, fontWeight:600, textDecoration:"none" }}>📞</a>}</div>)}
+                    </div>
+                  )}
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+                    {[["月租金",fmt(room.rent)],["繳租日",room.rentDay?`每月 ${room.rentDay} 號`:"—"],["起租日",toROC(room.leaseStart)],["合約到期",toROC(room.contractEnd)],["剩餘天數",dl!==null?`${dl} 天`:"—"]].map(([k,v])=>(
+                      <div key={k} style={{ background:T.bgSub, borderRadius:7, padding:"8px 10px", border:`1px solid ${T.border}` }}><div style={{ fontSize:11, color:T.textMuted, fontWeight:600, marginBottom:2 }}>{k}</div><div style={{ fontSize:14, fontWeight:600, color:T.text }}>{v}</div></div>
+                    ))}
+                  </div>
+                  {(room.renewals||[]).length>0 && <div style={{ marginBottom:10, background:T.accentBg, border:`1px solid ${T.accent}33`, borderRadius:8, padding:"10px 12px" }}><div style={{ fontSize:11, color:T.accent, fontWeight:700, marginBottom:8 }}>🔄 續約記錄</div>{(room.renewals||[]).map((rv,i)=><div key={i} style={{ display:"flex", gap:8, marginBottom:i<room.renewals.length-1?8:0 }}><div style={{ background:T.bg, borderRadius:6, padding:"6px 10px", border:`1px solid ${T.border}`, flex:1 }}><div style={{ fontSize:10, color:T.textMuted, fontWeight:600, marginBottom:1 }}>第{i+1}次·起租</div><div style={{ fontSize:13, fontWeight:600, color:T.text }}>{toROC(rv.renewStart)||"—"}</div></div><div style={{ background:T.bg, borderRadius:6, padding:"6px 10px", border:`1px solid ${T.border}`, flex:1 }}><div style={{ fontSize:10, color:T.textMuted, fontWeight:600, marginBottom:1 }}>第{i+1}次·到期</div><div style={{ fontSize:13, fontWeight:600, color:T.text }}>{toROC(rv.renewEnd)||"—"}</div></div></div>)}</div>}
+                  {(room.contractPhoto || (isSA && room.ownerBankPhoto)) && <div style={{ display:"flex", gap:8, marginBottom:10 }}>{room.contractPhoto&&<button onClick={()=>setViewPhoto(room.contractPhoto)} style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:7, padding:"7px", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>📄 租約照片</button>}{isSA&&room.ownerBankPhoto&&<button onClick={()=>setViewPhoto(room.ownerBankPhoto)} style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:7, padding:"7px", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>🏦 匯款帳號</button>}</div>}
+
+                  {/* ── 匯款截圖記錄區塊（所有身份可見，租客可上傳） ── */}
+                  <PaymentRecords
+                    room={room}
+                    currentUser={currentUser}
+                    isViewer={isViewer}
+                    onUpdate={onUpdate}
+                    onViewPhoto={setViewPhoto}
+                  />
+
+                  <div style={{ display:"flex", gap:8 }}>
+                    <button onClick={()=>setOpenChat(room.id)} style={{ flex:1, ...S.btn(T.blue,true), justifyContent:"center", fontSize:13 }}>💬 {(room.messages||[]).length>0?`對話(${room.messages.length})`:"對話室"}</button>
+                    {canEditRoom && <button onClick={()=>openEdit(room)} style={{ ...S.btn(T.textSub,true), fontSize:13 }}><Icon n="edit" s={13}/></button>}
+                    {canDeleteRoom
+                      ? <button onClick={()=>setConfirmDel(room)} style={{ ...S.btn(T.red,true), fontSize:13 }}><Icon n="trash" s={13}/></button>
+                      : canEditRoom && (
+                        <div title="僅後台維修可刪除" style={{ ...S.btn(T.textMuted,true), fontSize:13, opacity:0.4, cursor:"not-allowed" }}>
+                          <Icon n="lock" s={13}/>
+                        </div>
+                      )
+                    }
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {viewPhoto && <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.7)", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }} onClick={()=>setViewPhoto(null)}><img src={viewPhoto} style={{ maxWidth:"90vw", maxHeight:"85vh", borderRadius:10, objectFit:"contain" }} alt="photo"/></div>}
+
+      {confirmDel && <Modal title="確認刪除房源" onClose={()=>setConfirmDel(null)} width={360}><div style={{ textAlign:"center", padding:"8px 0 16px" }}><div style={{ color:T.text, fontSize:15, fontWeight:700, marginBottom:8 }}>刪除「{confirmDel.communityName}」？</div><div style={{ color:T.textSub, fontSize:14, lineHeight:1.6, marginBottom:20 }}>此操作無法復原。</div><div style={{ display:"flex", gap:10 }}><button onClick={()=>setConfirmDel(null)} style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"10px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>取消</button><button onClick={()=>deleteRoom(confirmDel)} style={{ flex:1, background:T.red, color:"#fff", border:"none", borderRadius:8, padding:"10px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>確認刪除</button></div></div></Modal>}
+
+      {showAdd && (
+        <Modal title={editRoom ? `編輯「${editRoom.communityName}」` : "新增房源"} onClose={()=>{setShowAdd(false);setEditRoom(null);}}>
+
+          {/* 管理員身份提示 */}
+          {isAdmin && (
+            <div style={{ display:"flex", alignItems:"center", gap:8, background:T.accentBg, border:`1px solid ${T.accent}33`, borderRadius:8, padding:"8px 12px", marginBottom:14 }}>
+              <span style={{ fontSize:14 }}>ℹ️</span>
+              <span style={{ fontSize:13, color:T.accent }}>管理員身份：可新增／修改房源，<strong>不可刪除</strong>，所有操作將留存記錄。</span>
+            </div>
+          )}
+
+          <div style={{ fontSize:12, color:T.blue, fontWeight:700, marginBottom:10, letterSpacing:"0.06em" }}>基本資訊</div>
+          {[["communityName","社區名稱 *"],["ownerName","屋主名字"],["salesRep","開發業務"],["address","地址"]].map(([k,l])=><div key={k}><label style={S.label}>{l}</label><input style={S.input} value={form[k]} onChange={sf(k)}/></div>)}
+          <label style={S.label}>繳租日期</label>
+          <select style={S.input} value={form.rentDay} onChange={sf("rentDay")}>{Array.from({length:31},(_,i)=>i+1).map(d=><option key={d} value={d}>{d} 號</option>)}</select>
+          <div onClick={()=>setForm(f=>({...f,autoRentRemind:!f.autoRentRemind}))} style={{ display:"flex", alignItems:"center", gap:10, background:form.autoRentRemind?T.accentBg:T.bgSub, border:`1px solid ${form.autoRentRemind?T.accent:T.border}`, borderRadius:8, padding:"10px 14px", marginBottom:12, cursor:"pointer", userSelect:"none" }}>
+            <div style={{ width:20, height:20, borderRadius:5, border:`2px solid ${form.autoRentRemind?T.accent:T.borderMd}`, background:form.autoRentRemind?T.accent:T.bg, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>{form.autoRentRemind&&<span style={{ color:"#fff", fontSize:13 }}>✓</span>}</div>
+            <div><div style={{ fontSize:14, fontWeight:600, color:form.autoRentRemind?T.accent:T.text }}>自動提醒繳租</div><div style={{ fontSize:12, color:T.textSub, marginTop:1 }}>每月繳租日自動發送提醒訊息</div></div>
+          </div>
+          <label style={S.label}>月租金 *</label><input style={S.input} type="text" value={form.rent} onChange={sf("rent")}/>
+          <label style={S.label}>起租日</label>
+          <ROCDateInput value={form.leaseStart} onChange={e=>setForm(f=>({...f,leaseStart:e.target.value,contractEnd:addOneYear(e.target.value)}))}/>
+          <label style={S.label}>租約到期日</label>
+          <ROCDateInput value={form.contractEnd} onChange={e=>setForm(f=>({...f,contractEnd:e.target.value}))}/>
+          <div style={{ border:`1px solid ${T.border}`, borderRadius:9, marginBottom:14, overflow:"hidden" }}>
+            <div onClick={()=>setShowRenew(v=>!v)} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 13px", cursor:"pointer", background:showRenew?T.accentBg:T.bgMuted, userSelect:"none" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:7 }}><span style={{ fontSize:13, fontWeight:700, color:showRenew?T.accent:T.text }}>🔄 續約資料</span>{(form.renewals||[]).length>0&&<span style={{ background:T.accent, color:"#fff", fontSize:11, fontWeight:700, borderRadius:99, padding:"1px 7px" }}>{form.renewals.length} 筆</span>}</div>
+              <span style={{ color:T.textMuted, fontSize:11, transform:showRenew?"rotate(180deg)":"rotate(0deg)", display:"inline-block", transition:"transform 0.2s" }}>▼</span>
+            </div>
+            {showRenew && <div style={{ padding:"12px 13px", background:T.bg, borderTop:`1px solid ${T.border}` }}>
+              {(form.renewals||[]).length===0?<div style={{ textAlign:"center", color:T.textMuted, fontSize:13, padding:"8px 0" }}>尚無續約記錄</div>:(form.renewals||[]).map((rv,i)=><div key={i} style={{ background:T.bgSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"10px 12px", marginBottom:10 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}><span style={{ fontSize:12, fontWeight:700, color:T.accent }}>第 {i+1} 次續約</span><button onClick={()=>setForm(f=>({...f,renewals:f.renewals.filter((_,j)=>j!==i)}))} style={{ background:T.redBg, color:T.red, border:"none", borderRadius:5, padding:"2px 8px", fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>刪除</button></div>
+                <label style={S.label}>續約起租日</label><ROCDateInput value={rv.renewStart} onChange={e=>setForm(f=>({...f,renewals:f.renewals.map((r,j)=>j===i?{renewStart:e.target.value,renewEnd:addOneYear(e.target.value)}:r)}))}/>
+                <label style={S.label}>續約到期日</label><ROCDateInput value={rv.renewEnd} onChange={e=>setForm(f=>({...f,renewals:f.renewals.map((r,j)=>j===i?{...r,renewEnd:e.target.value}:r)}))}/>
+              </div>)}
+              <button onClick={()=>{ const prev=(form.renewals||[]).length>0?form.renewals[form.renewals.length-1].renewEnd:form.contractEnd; const ns=prev||todayStr(); setForm(f=>({...f,renewals:[...(f.renewals||[]),{renewStart:ns,renewEnd:addOneYear(ns)}]})); }} style={{ ...S.btn(T.accent,true), width:"100%", justifyContent:"center", fontSize:13, marginTop:4 }}><Icon n="plus" s={13}/> {(form.renewals||[]).length===0?"新增第一次續約":"新增下一年度續約"}</button>
+            </div>}
+          </div>
+          <div style={{ fontSize:12, color:T.blue, fontWeight:700, marginBottom:10, letterSpacing:"0.06em" }}>租客聯絡</div>
+          {[["tenantContactName","主租客姓名"],["tenantContactPhone","主租客電話"]].map(([k,l])=><div key={k}><label style={S.label}>{l}</label><input style={S.input} value={form[k]} onChange={sf(k)}/></div>)}
+          {(form.cohabitants||[]).map((c,i)=><div key={i} style={{ background:T.bgSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"10px 12px", marginBottom:8 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}><span style={{ fontSize:12, color:T.textSub, fontWeight:700 }}>同住人 {i+1}</span><button onClick={()=>setForm(f=>({...f,cohabitants:f.cohabitants.filter((_,j)=>j!==i)}))} style={{ background:T.redBg, color:T.red, border:"none", borderRadius:5, padding:"3px 9px", fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>刪除</button></div>
+            <label style={S.label}>姓名</label><input style={S.input} value={c.name} placeholder="同住人姓名" onChange={e=>setForm(f=>({...f,cohabitants:f.cohabitants.map((x,j)=>j===i?{...x,name:e.target.value}:x)}))}/>
+            <label style={S.label}>電話</label><input style={{ ...S.input, marginBottom:0 }} value={c.phone} placeholder="同住人電話" onChange={e=>setForm(f=>({...f,cohabitants:f.cohabitants.map((x,j)=>j===i?{...x,phone:e.target.value}:x)}))}/>
+          </div>)}
+          <button onClick={()=>setForm(f=>({...f,cohabitants:[...(f.cohabitants||[]),{name:"",phone:""}]}))} style={{ ...S.btn(T.textSub,true), width:"100%", justifyContent:"center", marginBottom:12 }}><Icon n="plus" s={13}/> 新增同住人</button>
+
+          {/* 照片區 — 租約照片所有人都可上傳；匯款帳號只限 superadmin */}
+          <div style={{ fontSize:12, color:T.blue, fontWeight:700, marginBottom:10, marginTop:4, letterSpacing:"0.06em" }}>照片</div>
+          <div style={{ marginBottom:10 }}>
+            <label style={S.label}>租約照片</label>
+            <input ref={fileRef} type="file" accept="image/*" onChange={e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>setForm(fm=>({...fm,contractPhoto:ev.target.result})); r.readAsDataURL(f); }} style={{ display:"none" }}/>
+            <button onClick={()=>fileRef.current?.click()} style={{ ...S.btn(T.textSub,true), width:"100%", justifyContent:"center", marginBottom:4 }}>
+              {form.contractPhoto ? "✅ 已上傳（點擊更換）" : "選擇照片"}
+            </button>
+          </div>
+          {/* 屋主匯款帳號：僅 superadmin 可見 */}
+          {isSA && (
+            <div style={{ marginBottom:10 }}>
+              <label style={S.label}>屋主匯款帳號（僅後台維修可見）</label>
+              <input ref={bankRef} type="file" accept="image/*" onChange={e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>setForm(fm=>({...fm,ownerBankPhoto:ev.target.result})); r.readAsDataURL(f); }} style={{ display:"none" }}/>
+              <button onClick={()=>bankRef.current?.click()} style={{ ...S.btn(T.textSub,true), width:"100%", justifyContent:"center" }}>
+                {form.ownerBankPhoto ? "✅ 已上傳（點擊更換）" : "選擇照片"}
+              </button>
+            </div>
+          )}
+
+          <button onClick={saveRoom} style={{ ...S.btn(), width:"100%", justifyContent:"center", padding:11, marginTop:4 }}>{editRoom?"儲存修改":"確認新增"}</button>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+//  TENANTS
+// ═══════════════════════════════════════════════════════
+function Tenants({ data, currentUser, onUpdate }) {
+  const { tenants, rooms } = data;
+  const isSA = currentUser.role==="superadmin";
+  const [sel, setSel] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [editT, setEditT] = useState(null);
+  const [confirmDel, setConfirmDel] = useState(null);
+  const EMPTY = { name:"",phone:"",email:"",idNo:"",roomId:"",moveIn:"",contractEnd:"",deposit:"",emergencyName:"",emergencyPhone:"",note:"" };
+  const [form, setForm] = useState(EMPTY);
+  const sf = k => e => setForm(f=>({...f,[k]:e.target.value}));
+
+  const saveTenant = () => {
+    if (!form.name) return;
+    if (editT) {
+      onUpdate(d=>({...d,tenants:d.tenants.map(t=>t.id===editT.id?{...t,...form,deposit:parseInt(form.deposit)||0}:t),rooms:d.rooms.map(r=>{ if(r.id===editT.roomId&&r.id!==form.roomId)return{...r,status:"vacant",tenantId:null}; if(r.id===form.roomId)return{...r,status:"rented",tenantId:editT.id}; return r; }),activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`修改房客「${form.name}」資料`,timestamp:nowISO()}]}));
+    } else {
+      const nid=uid();
+      onUpdate(d=>({...d,tenants:[...d.tenants,{id:nid,...form,deposit:parseInt(form.deposit)||0}],rooms:d.rooms.map(r=>r.id===form.roomId?{...r,status:"rented",tenantId:nid}:r),activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`新增房客「${form.name}」`,timestamp:nowISO()}]}));
+    }
+    setShowForm(false); setEditT(null);
+  };
+
+  const delTenant = (t) => {
+    onUpdate(d=>({...d,tenants:d.tenants.filter(x=>x.id!==t.id),rooms:d.rooms.map(r=>r.id===t.roomId?{...r,status:"vacant",tenantId:null}:r),activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`刪除房客「${t.name}」`,timestamp:nowISO()}]}));
+    setConfirmDel(null); setSel(null);
+  };
+
+  return (
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+        <h2 style={S.title}>房客管理</h2>
+        {isSA&&<button onClick={()=>{setForm(EMPTY);setEditT(null);setShowForm(true);}} style={S.btn()}><Icon n="plus" s={13}/> 新增房客</button>}
+      </div>
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        {(tenants||[]).map(t=>{
+          const r=rooms.find(x=>x.id===t.roomId);
+          const days=t.contractEnd?daysUntil(t.contractEnd):null;
+          const near=days!==null&&days<=60&&days>0;
+          const open=sel===t.id;
+          return (
+            <div key={t.id} style={{ ...S.card, borderColor:near?T.amber+"66":T.border }}>
+              <div onClick={()=>setSel(open?null:t.id)} style={{ display:"flex", alignItems:"center", gap:12, cursor:"pointer" }}>
+                <div style={{ width:38, height:38, borderRadius:"50%", background:t.isCohabitant?T.bgMuted:T.accentBg, display:"flex", alignItems:"center", justifyContent:"center", fontWeight:700, fontSize:15, color:t.isCohabitant?T.textSub:T.accent, flexShrink:0 }}>{(t.name||"?")[0]}</div>
+                <div style={{ flex:1 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:6 }}><span style={{ fontWeight:700, color:T.text, fontSize:14 }}>{t.name}</span>{t.isCohabitant&&<span style={S.tag(T.textMuted)}>同住人</span>}</div>
+                  <div style={{ fontSize:13, color:T.textSub, marginTop:1 }}>{r?.communityName||"未分配"} · {t.phone}</div>
+                </div>
+                <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4 }}>
+                  {near&&<span style={S.tag(T.amber)}>即將到期</span>}
+                  <span style={{ fontSize:12, color:T.textMuted }}>{open?"▲":"▼"}</span>
+                </div>
+              </div>
+              {open&&<div style={{ marginTop:14, paddingTop:14, borderTop:`1px solid ${T.border}` }}>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+                  {[["入住日",toROC(t.moveIn)],["合約到期",toROC(t.contractEnd)],["押金",t.deposit?fmt(t.deposit):"—"],["剩餘天數",days!==null?`${days} 天`:"—"]].map(([k,v])=><div key={k} style={{ background:T.bgSub, borderRadius:7, padding:"8px 10px", border:`1px solid ${T.border}` }}><div style={{ fontSize:11, color:T.textMuted, fontWeight:600, marginBottom:2 }}>{k}</div><div style={{ fontSize:14, fontWeight:600, color:T.text }}>{v}</div></div>)}
+                </div>
+                <div style={{ display:"flex", gap:8, marginBottom:isSA?10:0 }}>
+                  {t.phone&&<a href={`tel:${t.phone}`} style={{ flex:1, background:T.greenBg, color:T.green, border:`1px solid ${T.green}44`, borderRadius:8, padding:"9px", fontSize:13, fontWeight:600, textDecoration:"none", textAlign:"center" }}>📞 撥打電話</a>}
+                  {t.email&&<a href={`mailto:${t.email}`} style={{ flex:1, background:T.accentBg, color:T.accent, border:`1px solid ${T.accent}44`, borderRadius:8, padding:"9px", fontSize:13, fontWeight:600, textDecoration:"none", textAlign:"center" }}>✉️ 寄信</a>}
+                </div>
+                {isSA&&<div style={{ display:"flex", gap:8, paddingTop:10, borderTop:`1px solid ${T.border}` }}>
+                  <button onClick={()=>{setForm({...EMPTY,...t,deposit:String(t.deposit||"")});setEditT(t);setShowForm(true);}} style={{ flex:1, ...S.btn(T.textSub,true), justifyContent:"center", fontSize:13 }}><Icon n="edit" s={13}/> 編輯</button>
+                  <button onClick={()=>setConfirmDel(t)} style={{ flex:1, ...S.btn(T.red,true), justifyContent:"center", fontSize:13 }}><Icon n="trash" s={13}/> 刪除</button>
+                </div>}
+              </div>}
+            </div>
+          );
+        })}
+      </div>
+      {showForm&&<Modal title={editT?`編輯「${editT.name}」`:"新增房客"} onClose={()=>{setShowForm(false);setEditT(null);}}>
+        <div style={{ fontSize:12, color:T.blue, fontWeight:700, marginBottom:10, letterSpacing:"0.06em" }}>基本資料</div>
+        {[["name","姓名 *","text"],["phone","電話","text"],["email","Email","email"],["idNo","身份證號","text"]].map(([k,l,tp])=><div key={k}><label style={S.label}>{l}</label><input style={S.input} type={tp} value={form[k]} onChange={sf(k)}/></div>)}
+        <div style={{ fontSize:12, color:T.blue, fontWeight:700, marginBottom:10, marginTop:4, letterSpacing:"0.06em" }}>租約資訊</div>
+        <label style={S.label}>分配房間</label>
+        <select style={S.input} value={form.roomId} onChange={sf("roomId")}><option value="">— 選擇房間 —</option>{rooms.filter(r=>r.status==="vacant"||r.id===editT?.roomId).map(r=><option key={r.id} value={r.id}>{r.communityName} {r.id===editT?.roomId?"（目前）":`(${fmt(r.rent)}/月)`}</option>)}</select>
+        {[["moveIn","入住日","date"],["contractEnd","合約到期","date"],["deposit","押金金額","number"]].map(([k,l,tp])=><div key={k}><label style={S.label}>{l}</label><input style={S.input} type={tp} value={form[k]} onChange={sf(k)}/></div>)}
+        <label style={S.label}>備註</label>
+        <textarea style={{ ...S.input, height:68, resize:"vertical" }} value={form.note} onChange={sf("note")} placeholder="特殊注意事項..."/>
+        <button onClick={saveTenant} style={{ ...S.btn(), width:"100%", justifyContent:"center", padding:11, marginTop:4 }}>{editT?"儲存修改":"確認新增"}</button>
+      </Modal>}
+      {confirmDel&&<Modal title="確認刪除房客" onClose={()=>setConfirmDel(null)} width={360}><div style={{ textAlign:"center", padding:"8px 0 16px" }}><div style={{ color:T.text, fontSize:15, fontWeight:700, marginBottom:8 }}>刪除「{confirmDel.name}」？</div><div style={{ color:T.textSub, fontSize:14, lineHeight:1.6, marginBottom:20 }}>對應房間將自動設為空房。</div><div style={{ display:"flex", gap:10 }}><button onClick={()=>setConfirmDel(null)} style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"10px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>取消</button><button onClick={()=>delTenant(confirmDel)} style={{ flex:1, background:T.red, color:"#fff", border:"none", borderRadius:8, padding:"10px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>確認刪除</button></div></div></Modal>}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+//  BILLS
+// ═══════════════════════════════════════════════════════
+function Bills({ data, currentUser, onUpdate }) {
+  const { bills, tenants, rooms } = data;
+  const role = safeRole(currentUser.role);
+  const isTenant = currentUser.role==="viewer";
+  const tenantRoomId = isTenant?(currentUser._roomId||""):"";
+  const [filter, setFilter] = useState("all");
+  const [monthFilter, setMonthFilter] = useState(new Date().toISOString().slice(0,7));
+  const [viewProof, setViewProof] = useState(null);
+  const proofRefs = useRef({});
+  const thisMonth = new Date().toISOString().slice(0,7);
+
+  const shown = (bills||[]).filter(b=>isTenant?b.roomId===tenantRoomId:true).filter(b=>!monthFilter||b.month===monthFilter).filter(b=>filter==="all"?true:b.status===filter);
+  const shownPaid = shown.filter(b=>b.status==="paid").reduce((s,b)=>s+(b.amount||0),0);
+  const shownUnpaid = shown.filter(b=>b.status==="unpaid").reduce((s,b)=>s+(b.amount||0),0);
+  const missingCnt = rooms.filter(r=>r.status==="rented"&&!(bills||[]).find(b=>b.roomId===r.id&&b.month===thisMonth)).length;
+  const allMonths = [...new Set((bills||[]).map(b=>b.month))].sort().reverse();
+  if (!allMonths.includes(thisMonth)) allMonths.unshift(thisMonth);
+
+  if (!role.canViewFinance&&!isTenant) return <div style={{ textAlign:"center", padding:60, color:T.textSub }}><Icon n="lock" s={40}/><div style={{ marginTop:12, fontSize:14 }}>您的權限不足以查看財務資料</div></div>;
+
+  return (
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+        <h2 style={{ ...S.title, marginBottom:0 }}>{isTenant?"我的帳單":"帳務管理"}</h2>
+        {role.canEdit&&missingCnt>0&&<button onClick={()=>onUpdate(d=>{ let nb=[...d.bills]; d.rooms.filter(r=>r.status==="rented").forEach(r=>{ if(!nb.find(b=>b.roomId===r.id&&b.month===thisMonth)){const t=d.tenants.find(t=>(t.linkedRoom===r.id||t.roomId===r.id)&&!t.isCohabitant); nb=[...nb,{id:uid(),tenantId:t?.id||r.tenantId||"",roomId:r.id,type:"rent",amount:r.rent,month:thisMonth,status:"unpaid",paidDate:null,recordedBy:null}];} }); return{...d,bills:nb,activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`產生 ${thisMonth} 月所有房源帳單`,timestamp:nowISO()}]};})} style={{ ...S.btn(T.accent), fontSize:13 }}><Icon n="plus" s={13}/> 產生本月帳單（{missingCnt}間）</button>}
+      </div>
+      <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
+        <select value={monthFilter} onChange={e=>setMonthFilter(e.target.value)} style={{ background:T.bg, border:`1px solid ${T.borderMd}`, borderRadius:7, color:T.text, padding:"6px 10px", fontSize:13, outline:"none", cursor:"pointer", fontFamily:"inherit" }}>
+          <option value="">全部月份</option>{allMonths.map(m=><option key={m} value={m}>{toROCMonth(m)}</option>)}
+        </select>
+        {[["all","全部"],["unpaid","未繳"],["paid","已繳"]].map(([v,l])=><button key={v} onClick={()=>setFilter(v)} style={{ background:filter===v?T.accent:T.bgMuted, color:filter===v?"#fff":T.textSub, border:`1px solid ${filter===v?T.accent:T.border}`, borderRadius:7, padding:"6px 14px", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>{l}</button>)}
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:14 }}>
+        <div style={{ ...S.card, borderColor:T.green+"44" }}><div style={{ fontSize:11, color:T.textSub, fontWeight:700 }}>已收款</div><div style={{ fontSize:20, fontWeight:800, color:T.green, marginTop:6 }}>{fmt(shownPaid)}</div></div>
+        <div style={{ ...S.card, borderColor:T.red+"44" }}><div style={{ fontSize:11, color:T.textSub, fontWeight:700 }}>未收款</div><div style={{ fontSize:20, fontWeight:800, color:T.red, marginTop:6 }}>{fmt(shownUnpaid)}</div></div>
+      </div>
+      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+        {shown.length===0&&<div style={{ textAlign:"center", color:T.textSub, padding:"32px 0", fontSize:14 }}>此條件下無帳單記錄</div>}
+        {shown.sort((a,b)=>(a.status==="unpaid"?-1:1)-(b.status==="unpaid"?-1:1)).map(b=>{
+          const t=(tenants||[]).find(x=>x.id===b.tenantId);
+          const r=rooms.find(x=>x.id===b.roomId);
+          const rec=(data.users||[]).find(u=>u.id===b.recordedBy);
+          const over=b.status==="unpaid"&&b.month<thisMonth;
+          return (
+            <div key={b.id} style={{ ...S.card, border:`1px solid ${over?T.red+"66":(b.status==="unpaid"?T.amber+"66":T.border)}` }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontWeight:700, color:T.text, fontSize:14 }}>{r?.communityName||"—"}</div>
+                  <div style={{ fontSize:13, color:T.textSub, marginTop:2 }}>{isTenant?"":(t?.name||"—")+" · "}{toROCMonth(b.month)} · {SL[b.type]}</div>
+                  {rec&&b.status==="paid"&&<div style={{ fontSize:12, color:T.textMuted, marginTop:2 }}>由 {rec.name} 記錄</div>}
+                  {over&&<div style={{ fontSize:12, color:T.red, fontWeight:700, marginTop:2 }}>⚠️ 逾期未繳</div>}
+                </div>
+                <div style={{ textAlign:"right", flexShrink:0, marginLeft:12 }}>
+                  <div style={{ fontWeight:700, color:b.status==="paid"?T.green:(over?T.red:T.amber), fontSize:15 }}>{fmt(b.amount)}</div>
+                  {b.status==="unpaid"&&role.canEdit?<button onClick={()=>onUpdate(d=>({...d,bills:d.bills.map(x=>x.id===b.id?{...x,status:"paid",paidDate:todayStr(),recordedBy:currentUser.id}:x),activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`標記「${r?.communityName||b.roomId}」款項已繳`,timestamp:nowISO()}]}))} style={{ background:T.greenBg, color:T.green, border:`1px solid ${T.green}44`, borderRadius:6, padding:"4px 10px", fontSize:13, cursor:"pointer", marginTop:4, fontWeight:600, fontFamily:"inherit" }}>標記已收</button>:b.paidDate?<div style={{ fontSize:12, color:T.textMuted, marginTop:4 }}>{toROC(b.paidDate)}</div>:null}
+                </div>
+              </div>
+              <div style={{ marginTop:10, borderTop:`1px solid ${T.border}`, paddingTop:10 }}>
+                {b.paymentProof?<div style={{ display:"flex", alignItems:"center", gap:8 }}><button onClick={()=>setViewProof(b.paymentProof)} style={{ background:T.greenBg, color:T.green, border:`1px solid ${T.green}44`, borderRadius:7, padding:"5px 12px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>📷 查看截圖</button>{isTenant&&<button onClick={()=>{if(proofRefs.current[b.id])proofRefs.current[b.id].click();}} style={{ background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:7, padding:"5px 10px", fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>重新上傳</button>}</div>
+                  :isTenant?<button onClick={()=>{if(proofRefs.current[b.id])proofRefs.current[b.id].click();}} style={{ background:T.accentBg, color:T.accent, border:`1px solid ${T.accent}44`, borderRadius:7, padding:"6px 14px", fontSize:13, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:6, fontFamily:"inherit" }}>📷 租金截圖上傳</button>
+                  :<div style={{ fontSize:12, color:T.textMuted }}>尚未上傳截圖</div>}
+                {isTenant&&<input ref={el=>proofRefs.current[b.id]=el} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={e=>{ if(!e.target.files[0])return; const rd=new FileReader(); rd.onload=ev=>onUpdate(d=>({...d,bills:d.bills.map(x=>x.id===b.id?{...x,paymentProof:ev.target.result}:x)})); rd.readAsDataURL(e.target.files[0]); }}/>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {viewProof&&<div onClick={()=>setViewProof(null)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.8)", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}><img src={viewProof} style={{ maxWidth:"90vw", maxHeight:"85vh", borderRadius:10, objectFit:"contain" }} alt="截圖"/></div>}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+//  REPAIRS
+// ═══════════════════════════════════════════════════════
+function Repairs({ data, currentUser, onUpdate }) {
+  const { repairs, rooms, users } = data;
+  const role = safeRole(currentUser.role);
+  const isTenant = currentUser.role==="viewer";
+  const tenantRoomId = isTenant?(currentUser._roomId||""):"";
+  const mkEmpty = () => ({roomId:tenantRoomId,title:"",desc:"",priority:"high",photos:[]});
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState(mkEmpty);
+  const [viewPhoto, setViewPhoto] = useState(null);
+  const photoRef = useRef(null);
+  const SC = { done:T.green, in_progress:T.blue, pending:T.amber };
+  const PC = { high:T.red, low:T.textMuted };
+  const visible = isTenant?(repairs||[]).filter(r=>r.roomId===tenantRoomId):(repairs||[]);
+
+  const addRepair = () => {
+    if(!form.title||!form.roomId) return;
+    const r=rooms.find(x=>x.id===form.roomId);
+    onUpdate(d=>({...d,repairs:[...d.repairs,{id:uid(),...form,status:"pending",date:todayStr(),tenantName:currentUser.name||"—",assignedTo:null,updatedBy:null,photos:form.photos||[]}],activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`新增報修「${form.title}」(${r?.communityName||""})`,timestamp:nowISO()}]}));
+    setShowAdd(false); setForm(mkEmpty());
+  };
+
+  return (
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+        <h2 style={S.title}>報修管理</h2>
+        {(role.canEdit||isTenant)&&<button onClick={()=>{setForm(mkEmpty());setShowAdd(true);}} style={S.btn()}><Icon n="plus" s={13}/> 新增報修</button>}
+      </div>
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        {visible.length===0&&<div style={{ textAlign:"center", color:T.textSub, padding:"32px 0", fontSize:14 }}>目前沒有報修記錄</div>}
+        {visible.map(r=>{
+          const rm=rooms.find(x=>x.id===r.roomId);
+          const up=(users||[]).find(u=>u.id===r.updatedBy);
+          return (
+            <div key={r.id} style={S.card}>
+              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}><div style={{ width:7, height:7, borderRadius:"50%", background:PC[r.priority]||T.textMuted, flexShrink:0 }}/><span style={{ fontWeight:700, color:T.text, fontSize:14 }}>{r.title}</span></div>
+                <span style={S.tag(SC[r.status]||T.textSub)}>{SL[r.status]}</span>
+              </div>
+              <div style={{ fontSize:13, color:T.textSub, marginBottom:4 }}>{rm?.communityName} · {r.tenantName} · {toROC(r.date)}</div>
+              {r.desc&&<div style={{ fontSize:13, color:T.textMuted, marginBottom:(r.photos||[]).length>0?10:0 }}>{r.desc}</div>}
+              {(r.photos||[]).length>0&&<div style={{ display:"flex", gap:8, flexWrap:"wrap", marginTop:8, marginBottom:10 }}>{r.photos.map((src,i)=><div key={i} onClick={()=>setViewPhoto(src)} style={{ width:72, height:72, borderRadius:8, overflow:"hidden", border:`1px solid ${T.border}`, cursor:"pointer", flexShrink:0 }}><img src={src} alt={`報修圖${i+1}`} style={{ width:"100%", height:"100%", objectFit:"cover" }}/></div>)}</div>}
+              {up&&<div style={{ fontSize:12, color:T.textMuted, marginBottom:8 }}>由 {up.name} 更新</div>}
+              {r.status!=="done"&&role.canEdit&&<div style={{ display:"flex", gap:8 }}>{r.status==="pending"&&<button onClick={()=>onUpdate(d=>({...d,repairs:d.repairs.map(x=>x.id===r.id?{...x,status:"in_progress",updatedBy:currentUser.id}:x),activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`更新報修「${r.title}」為處理中`,timestamp:nowISO()}]}))} style={S.btn(T.blue,true)}>開始處理</button>}<button onClick={()=>onUpdate(d=>({...d,repairs:d.repairs.map(x=>x.id===r.id?{...x,status:"done",updatedBy:currentUser.id}:x),activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`更新報修「${r.title}」為已完成`,timestamp:nowISO()}]}))} style={S.btn(T.green,true)}>完成</button></div>}
+            </div>
+          );
+        })}
+      </div>
+      {viewPhoto&&<div onClick={()=>setViewPhoto(null)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.82)", zIndex:3000, display:"flex", alignItems:"center", justifyContent:"center", padding:16, cursor:"zoom-out" }}><img src={viewPhoto} alt="放大" style={{ maxWidth:"92vw", maxHeight:"88vh", borderRadius:10, objectFit:"contain" }}/></div>}
+      {showAdd&&<Modal title="新增報修" onClose={()=>{setShowAdd(false);setForm(mkEmpty());}}>
+        <label style={S.label}>房間</label>
+        {isTenant?<div style={{ ...S.input, color:T.textSub, background:T.bgMuted, marginBottom:12 }}>{rooms.find(r=>r.id===tenantRoomId)?.communityName||"我的房間"}</div>:<select style={S.input} value={form.roomId} onChange={e=>setForm(f=>({...f,roomId:e.target.value}))}><option value="">— 選擇房間 —</option>{rooms.map(r=><option key={r.id} value={r.id}>{r.communityName}</option>)}</select>}
+        <label style={S.label}>問題標題 *</label><input style={S.input} value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))} placeholder="例：廁所漏水、冷氣不製冷"/>
+        <label style={S.label}>問題描述</label><textarea style={{ ...S.input, height:80, resize:"vertical" }} value={form.desc} onChange={e=>setForm(f=>({...f,desc:e.target.value}))} placeholder="請描述問題狀況..."/>
+        <label style={S.label}>現場照片（選填）</label>
+        <div onClick={()=>photoRef.current?.click()} style={{ border:`2px dashed ${T.borderMd}`, borderRadius:10, padding:"16px", textAlign:"center", cursor:"pointer", marginBottom:12, background:T.bgSub }}><div style={{ fontSize:22, marginBottom:4 }}>📷</div><div style={{ fontSize:13, color:T.textSub }}>點擊選擇圖片</div></div>
+        <input ref={photoRef} type="file" accept="image/*" multiple style={{ display:"none" }} onChange={e=>{ Array.from(e.target.files).forEach(f=>{ const r=new FileReader(); r.onload=ev=>setForm(f=>({...f,photos:[...(f.photos||[]),ev.target.result]})); r.readAsDataURL(f); }); e.target.value=""; }}/>
+        {(form.photos||[]).length>0&&<div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:14 }}>{form.photos.map((src,i)=><div key={i} style={{ position:"relative", width:70, height:70, borderRadius:8, overflow:"hidden", border:`1px solid ${T.border}`, flexShrink:0 }}><img src={src} alt={`圖${i+1}`} style={{ width:"100%", height:"100%", objectFit:"cover" }}/><button onClick={()=>setForm(f=>({...f,photos:f.photos.filter((_,j)=>j!==i)}))} style={{ position:"absolute", top:2, right:2, background:"rgba(0,0,0,0.55)", color:"#fff", border:"none", borderRadius:"50%", width:18, height:18, fontSize:12, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", padding:0, fontFamily:"inherit" }}>✕</button></div>)}</div>}
+        {!isTenant&&<><label style={S.label}>優先級</label><select style={S.input} value={form.priority} onChange={e=>setForm(f=>({...f,priority:e.target.value}))}><option value="high">高（緊急）</option><option value="low">低（一般）</option></select></>}
+        <button onClick={addRepair} disabled={!form.title||!form.roomId} style={{ ...S.btn(), width:"100%", justifyContent:"center", padding:12, opacity:(!form.title||!form.roomId)?0.5:1 }}>送出報修申請</button>
+      </Modal>}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+//  REPORT
+// ═══════════════════════════════════════════════════════
+function Report({ bills, rooms, tenants }) {
+  const thisYear = new Date().getFullYear();
+  const [yr, setYr] = useState(thisYear);
+  const [mode, setMode] = useState("monthly");
+
+  const monthly = Array.from({length:12},(_,i)=>{
+    const m=`${yr}-${String(i+1).padStart(2,"0")}`;
+    const mb=(bills||[]).filter(b=>b.month===m);
+    const coll=mb.filter(b=>b.status==="paid").reduce((s,b)=>s+(b.amount||0),0);
+    const uncoll=mb.filter(b=>b.status==="unpaid").reduce((s,b)=>s+(b.amount||0),0);
+    return { m, roomCount:[...new Set(mb.map(b=>b.roomId))].length, coll, uncoll, total:coll+uncoll };
+  });
+  const yColl=(monthly.reduce((s,m)=>s+m.coll,0)), yUncoll=(monthly.reduce((s,m)=>s+m.uncoll,0));
+  const maxT=Math.max(...monthly.map(m=>m.total),1);
+  const rented=(rooms||[]).filter(r=>r.status==="rented");
+  const occ=(rooms||[]).length>0?Math.round((rented.length/rooms.length)*100):0;
+  const yrStr=String(yr);
+
+  const billYears=[...new Set((bills||[]).map(b=>b.month?.slice(0,4)).filter(Boolean).map(Number))];
+  const years=[...new Set([...billYears,thisYear-1,thisYear,thisYear+1])].sort((a,b)=>b-a);
+
+  return (
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+        <div><h2 style={{ ...S.title, marginBottom:2 }}>房源報表</h2><p style={{ color:T.textSub, fontSize:13, margin:0 }}>民國 {yr-1911} 年</p></div>
+        <select value={yr} onChange={e=>setYr(Number(e.target.value))} style={{ background:T.bg, border:`1px solid ${T.borderMd}`, borderRadius:8, color:T.text, padding:"7px 10px", fontSize:13, outline:"none", cursor:"pointer", fontFamily:"inherit" }}>{years.map(y=><option key={y} value={y}>民國 {y-1911} 年</option>)}</select>
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:14 }}>
+        {[{l:"目前出租",v:`${rented.length} 間`,sub:`入住率 ${occ}%`,c:T.green},{l:"空房",v:`${(rooms||[]).filter(r=>r.status==="vacant").length} 間`,sub:`共 ${(rooms||[]).length} 間`,c:T.amber},{l:`${yr-1911}年已收款`,v:fmt(yColl),sub:"全年合計",c:T.blue},{l:`${yr-1911}年未收款`,v:fmt(yUncoll),sub:"全年合計",c:T.red}].map((s,i)=>(
+          <div key={i} style={S.card}><div style={{ fontSize:11, color:T.textSub, fontWeight:700, marginBottom:4 }}>{s.l}</div><div style={{ fontSize:18, fontWeight:800, color:s.c }}>{s.v}</div><div style={{ fontSize:12, color:T.textMuted, marginTop:2 }}>{s.sub}</div></div>
+        ))}
+      </div>
+      <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
+        {[["monthly","月份統計"],["rooms","房源明細"]].map(([k,l])=><button key={k} onClick={()=>setMode(k)} style={{ background:mode===k?T.accent:T.bgMuted, color:mode===k?"#fff":T.textSub, border:`1px solid ${mode===k?T.accent:T.border}`, borderRadius:7, padding:"6px 16px", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>{l}</button>)}
+      </div>
+      {mode==="monthly"&&<div style={{ ...S.card, padding:0, overflow:"hidden" }}>
+        <div style={{ padding:"14px 14px 6px", borderBottom:`1px solid ${T.border}` }}>
+          <div style={{ fontSize:12, color:T.textSub, fontWeight:700, marginBottom:10 }}>月收租走勢（民國 {yr-1911} 年）</div>
+          <div style={{ display:"flex", gap:4, alignItems:"flex-end", height:64 }}>
+            {monthly.map((m,i)=>{ const h=maxT>0?Math.max(4,Math.round((m.total/maxT)*60)):4; const hp=maxT>0?Math.round((m.coll/maxT)*60):0; const cur=m.m===new Date().toISOString().slice(0,7); return <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:2 }}><div style={{ width:"100%", height:h, borderRadius:"4px 4px 0 0", position:"relative", background:T.bgMuted, overflow:"hidden" }}><div style={{ position:"absolute", bottom:0, width:"100%", height:hp, background:cur?T.blue:T.green+"bb", borderRadius:"4px 4px 0 0" }}/></div><div style={{ fontSize:10, color:cur?T.blue:T.textMuted, fontWeight:cur?700:400 }}>{i+1}月</div></div>; })}
+          </div>
+        </div>
+        <div style={{ overflowX:"auto" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
+            <thead><tr style={{ background:T.bgSub }}>{["月份","出租間數","已收租金","未收租金","合計"].map(h=><th key={h} style={{ padding:"9px 10px", textAlign:h==="月份"?"left":"right", color:T.textSub, fontWeight:700, fontSize:11, borderBottom:`1px solid ${T.border}` }}>{h}</th>)}</tr></thead>
+            <tbody>{monthly.map((m,i)=>{ const cur=m.m===new Date().toISOString().slice(0,7); return <tr key={i} style={{ background:cur?T.accentBg:"transparent", borderBottom:`1px solid ${T.border}` }}><td style={{ padding:"9px 10px", color:cur?T.accent:T.text, fontWeight:cur?700:500 }}>{i+1} 月{cur&&<span style={{ fontSize:10, color:T.accent, marginLeft:4 }}>●本月</span>}</td><td style={{ padding:"9px 10px", textAlign:"right", color:T.text, fontWeight:600 }}>{m.roomCount} 間</td><td style={{ padding:"9px 10px", textAlign:"right", color:m.coll>0?T.green:T.textMuted, fontWeight:600 }}>{m.coll>0?fmt(m.coll):"—"}</td><td style={{ padding:"9px 10px", textAlign:"right", color:m.uncoll>0?T.red:T.textMuted, fontWeight:600 }}>{m.uncoll>0?fmt(m.uncoll):"—"}</td><td style={{ padding:"9px 10px", textAlign:"right", color:T.text, fontWeight:700 }}>{m.total>0?fmt(m.total):"—"}</td></tr>; })}</tbody>
+            <tfoot><tr style={{ background:T.bgSub, borderTop:`2px solid ${T.borderMd}` }}><td style={{ padding:"10px", fontWeight:800, color:T.text }}>全年合計</td><td style={{ padding:"10px", textAlign:"right", color:T.textSub }}>—</td><td style={{ padding:"10px", textAlign:"right", color:T.green, fontWeight:800 }}>{fmt(yColl)}</td><td style={{ padding:"10px", textAlign:"right", color:T.red, fontWeight:800 }}>{fmt(yUncoll)}</td><td style={{ padding:"10px", textAlign:"right", color:T.accent, fontWeight:800 }}>{fmt(yColl+yUncoll)}</td></tr></tfoot>
+          </table>
+        </div>
+      </div>}
+      {mode==="rooms"&&<div style={{ display:"flex", flexDirection:"column", gap:8 }}>{(rooms||[]).map(r=>{ const yb=(bills||[]).filter(b=>b.roomId===r.id&&b.month?.startsWith(yrStr)); const rc=yb.filter(b=>b.status==="paid").reduce((s,b)=>s+(b.amount||0),0); const ru=yb.filter(b=>b.status==="unpaid").reduce((s,b)=>s+(b.amount||0),0); return <div key={r.id} style={S.card}><div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}><div><div style={{ fontWeight:700, color:T.text, fontSize:14 }}>{r.communityName}</div>{r.address&&<div style={{ fontSize:12, color:T.textSub, marginTop:1 }}>📍 {r.address}</div>}</div><span style={S.tag(r.status==="rented"?T.green:T.amber)}>{r.status==="rented"?"已出租":"空房"}</span></div><div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>{[["月租金",fmt(r.rent),T.text],[`${yr-1911}年已收`,fmt(rc),T.green],[`${yr-1911}年未收`,fmt(ru),T.red]].map(([l,v,c])=><div key={l} style={{ background:T.bgSub, borderRadius:7, padding:"7px 8px", border:`1px solid ${T.border}` }}><div style={{ fontSize:10, color:T.textMuted, fontWeight:700 }}>{l}</div><div style={{ fontSize:13, fontWeight:700, color:c, marginTop:2 }}>{v}</div></div>)}</div></div>; })}</div>}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+//  USER MANAGEMENT
+// ═══════════════════════════════════════════════════════
+function UserManagement({ data, currentUser, onUpdate }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(null);
+  const [form, setForm] = useState({ name:"", email:"", password:"", role:"viewer" });
+  const save = () => {
+    if(!form.name||!form.email) return;
+    const nu={id:uid(),...form,avatar:form.name[0],online:false,lastSeen:null};
+    onUpdate(d=>({...d,users:[...d.users,nu],activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`新增使用者 ${form.name}`,timestamp:nowISO()}]}));
+    setShowAdd(false); setForm({name:"",email:"",password:"",role:"viewer"});
+  };
+  return (
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+        <h2 style={S.title}>人員管理</h2>
+        <button onClick={()=>setShowAdd(true)} style={S.btn()}><Icon n="plus" s={13}/> 新增人員</button>
+      </div>
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        {(data.users||[]).map(u=>(
+          <div key={u.id} style={{ ...S.card, display:"flex", alignItems:"center", gap:12 }}>
+            <AvatarBadge user={u} size={40}/>
+            <div style={{ flex:1 }}><div style={{ display:"flex", alignItems:"center", gap:6 }}><span style={{ fontWeight:600, color:T.text, fontSize:14 }}>{u.name}</span>{u.id===currentUser.id&&<span style={S.tag(T.blue)}>我</span>}</div><div style={{ fontSize:13, color:T.textSub, marginTop:2 }}>{u.email}</div></div>
+            <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:6 }}>
+              <span style={S.tag(safeRole(u.role).color)}>{safeRole(u.role).label}</span>
+              {u.id!==currentUser.id&&<>
+                <select value={u.role} onChange={e=>onUpdate(d=>({...d,users:d.users.map(x=>x.id===u.id?{...x,role:e.target.value}:x),activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`變更 ${u.name} 權限為 ${safeRole(e.target.value).label}`,timestamp:nowISO()}]}))} style={{ background:T.bg, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:6, padding:"3px 8px", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>{Object.entries(ROLES).filter(([k])=>k!=="system").map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select>
+                <button onClick={()=>setConfirmDel(u)} style={{ background:T.redBg, color:T.red, border:`1px solid ${T.red}33`, borderRadius:6, padding:"4px 10px", fontSize:13, fontWeight:600, cursor:"pointer", display:"flex", alignItems:"center", gap:4, fontFamily:"inherit" }}><Icon n="trash" s={12}/> 刪除</button>
+              </>}
+            </div>
+          </div>
+        ))}
+      </div>
+      {confirmDel&&<Modal title="確認刪除使用者" onClose={()=>setConfirmDel(null)} width={360}><div style={{ textAlign:"center", padding:"8px 0 16px" }}><div style={{ width:52, height:52, borderRadius:"50%", background:T.redBg, border:`2px solid ${T.red}44`, display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 14px", color:T.red }}><Icon n="trash" s={22}/></div><div style={{ color:T.text, fontSize:15, fontWeight:700, marginBottom:8 }}>刪除「{confirmDel.name}」？</div><div style={{ color:T.textSub, fontSize:14, lineHeight:1.6, marginBottom:20 }}>此操作無法復原。</div><div style={{ display:"flex", gap:10 }}><button onClick={()=>setConfirmDel(null)} style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"10px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>取消</button><button onClick={()=>{onUpdate(d=>({...d,users:d.users.filter(x=>x.id!==confirmDel.id),activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`刪除使用者 ${confirmDel.name}`,timestamp:nowISO()}]}));setConfirmDel(null);}} style={{ flex:1, background:T.red, color:"#fff", border:"none", borderRadius:8, padding:"10px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>確認刪除</button></div></div></Modal>}
+      {showAdd&&<Modal title="新增人員" onClose={()=>setShowAdd(false)}>{[["name","姓名"],["email","Email"],["password","密碼"]].map(([k,l])=><div key={k}><label style={S.label}>{l}</label><input style={S.input} type={k==="password"?"password":"text"} value={form[k]} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))}/></div>)}<label style={S.label}>權限角色</label><select style={S.input} value={form.role} onChange={e=>setForm(f=>({...f,role:e.target.value}))}>{Object.entries(ROLES).filter(([k])=>k!=="system").map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select><button onClick={save} style={{ ...S.btn(), width:"100%", justifyContent:"center", padding:11 }}>確認新增</button></Modal>}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+//  ACTIVITY LOG
+// ═══════════════════════════════════════════════════════
+function ActivityLog({ data, currentUser, onUpdate }) {
+  const { activityLog, users } = data;
+  const isSA    = currentUser?.role === "superadmin";
+  const isAdmin = currentUser?.role === "admin";
+  const canExportLog = isSA || isAdmin; // 管理員以上都能匯出記錄
+
+  const [confirmClear,     setConfirmClear]     = useState(false);
+  const [confirmExportLog, setConfirmExportLog] = useState(false);
+
+  // ── 一鍵匯出操作記錄（CSV，可直接用 Excel 開啟）──────
+  const exportLogCSV = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const BOM   = "\uFEFF"; // UTF-8 BOM，讓 Excel 正確顯示中文
+
+    // 標題列
+    const header = ["時間", "操作人員", "角色", "操作內容"].join(",");
+
+    // 資料列（從舊到新）
+    const rows = [...(activityLog || [])]
+      .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+      .map(log => {
+        const u  = (users || []).find(u => u.id === log.userId);
+        const lr = u ? safeRole(u.role).label : "—";
+        // CSV 欄位：若包含逗號或換行則用雙引號包覆，並跳脫內部雙引號
+        const escape = (s) => {
+          const str = String(s || "");
+          return /[,"\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+        };
+        return [
+          escape(toROC(log.timestamp, true)),
+          escape(u?.name || "系統"),
+          escape(lr),
+          escape(log.action),
+        ].join(",");
+      });
+
+    const csv  = BOM + [header, ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `家樂美_操作記錄_${today}.csv`;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+
+    // 記錄此動作後清空
+    const ts = new Date().toISOString();
+    onUpdate(d => ({
+      ...d,
+      activityLog: [{
+        id: uid(), userId: currentUser?.id,
+        action: `匯出操作記錄 CSV（共 ${(activityLog || []).length} 筆），並清空記錄`,
+        timestamp: ts,
+      }],
+    }));
+    setConfirmExportLog(false);
+  };
+
+  // ── 匯出系統備份（JSON）────────────────────────────────
+  const exportBackup = () => {
+    const ts   = new Date().toISOString();
+    const snap = { ...data, _backupTime: ts, _rentkeeper: true };
+    const blob = new Blob([JSON.stringify(snap, null, 2)], { type: "application/json" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `RentKeeper_備份_${ts.slice(0, 10)}.json`;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+    onUpdate(d => ({
+      ...d,
+      activityLog: [...d.activityLog, {
+        id: uid(), userId: currentUser?.id || "system",
+        action: "手動匯出系統備份檔案",
+        timestamp: new Date().toISOString(),
+      }],
+    }));
+  };
+
+  const logCount = (activityLog || []).length;
+
+  return (
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+        <h2 style={{ ...S.title, marginBottom:0 }}>操作記錄</h2>
+        <span style={{ fontSize:13, color:T.textSub }}>共 <strong style={{ color:T.text }}>{logCount}</strong> 筆</span>
+      </div>
+
+      {/* ── 操作按鈕區 ── */}
+      <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:20 }}>
+
+        {/* 一鍵匯出記錄（管理員 + 後台維修） */}
+        {canExportLog && (
+          <button onClick={()=>setConfirmExportLog(true)}
+            style={{ width:"100%", background:T.green, color:"#fff", border:"none", borderRadius:12, padding:"13px 16px", fontSize:15, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, fontFamily:"inherit", boxShadow:`0 4px 12px ${T.green}44` }}>
+            📋 一鍵匯出操作記錄（CSV）
+          </button>
+        )}
+
+        {/* 備份 + 清空（僅後台維修） */}
+        {isSA && (
+          <div style={{ display:"flex", gap:10 }}>
+            <button onClick={exportBackup}
+              style={{ flex:1, background:T.accent, color:"#fff", border:"none", borderRadius:10, padding:"11px 8px", fontSize:14, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6, fontFamily:"inherit" }}>
+              ⬇ 匯出系統備份
+            </button>
+            <button onClick={()=>setConfirmClear(true)}
+              style={{ flex:1, background:T.bg, color:T.red, border:`1px solid ${T.red}44`, borderRadius:10, padding:"11px 8px", fontSize:14, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6, fontFamily:"inherit" }}>
+              🗑 清空記錄
+            </button>
+          </div>
+        )}
+
+        {/* 權限說明 */}
+        {!canExportLog && (
+          <div style={{ ...S.card, display:"flex", alignItems:"center", gap:8, padding:"12px 16px" }}>
+            <Icon n="lock" s={16}/>
+            <span style={{ fontSize:13, color:T.textSub }}>您的身份無法匯出或清空記錄</span>
+          </div>
+        )}
+      </div>
+
+      {/* ── 確認匯出記錄對話框 ── */}
+      {confirmExportLog && (
+        <Modal title="確認匯出並清空記錄" onClose={()=>setConfirmExportLog(false)} width={360}>
+          <div style={{ padding:"4px 0 16px" }}>
+            <div style={{ background:T.accentBg, border:`1px solid ${T.accent}33`, borderRadius:10, padding:"14px", marginBottom:14 }}>
+              <div style={{ fontSize:15, fontWeight:700, color:T.accent, marginBottom:6 }}>📋 匯出操作記錄</div>
+              <div style={{ fontSize:13, color:T.textSub, lineHeight:1.7 }}>
+                將匯出 <strong style={{ color:T.text }}>{logCount} 筆</strong> 記錄為 CSV 檔案，<br/>
+                可直接用 Excel 開啟。<br/>
+                <span style={{ color:T.amber, fontWeight:600 }}>匯出完成後記錄將自動清空。</span>
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:10 }}>
+              <button onClick={()=>setConfirmExportLog(false)}
+                style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"11px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>
+                取消
+              </button>
+              <button onClick={exportLogCSV}
+                style={{ flex:1, background:T.green, color:"#fff", border:"none", borderRadius:8, padding:"11px", fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
+                確認匯出並清空
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── 確認清空對話框 ── */}
+      {confirmClear && (
+        <Modal title="確認清空記錄" onClose={()=>setConfirmClear(false)} width={360}>
+          <div style={{ padding:"4px 0 16px" }}>
+            <div style={{ background:T.redBg, border:`1px solid ${T.red}33`, borderRadius:8, padding:"12px 14px", marginBottom:14 }}>
+              <div style={{ color:T.red, fontWeight:700, fontSize:13, marginBottom:4 }}>⚠️ 清空後無法復原</div>
+              <div style={{ fontSize:13, color:T.textSub }}>目前共 <strong>{logCount}</strong> 筆記錄，清空後僅保留本次操作記錄。</div>
+            </div>
+            <div style={{ display:"flex", gap:10 }}>
+              <button onClick={()=>setConfirmClear(false)}
+                style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"11px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>
+                取消
+              </button>
+              <button onClick={()=>{ onUpdate(d=>({...d,activityLog:[{id:uid(),userId:currentUser?.id,action:`清空操作記錄（共 ${logCount} 筆）`,timestamp:new Date().toISOString()}]})); setConfirmClear(false); }}
+                style={{ flex:1, background:T.red, color:"#fff", border:"none", borderRadius:8, padding:"11px", fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
+                確認清空
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── 記錄列表 ── */}
+      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+        {logCount === 0 && (
+          <div style={{ textAlign:"center", color:T.textSub, padding:"32px 0", fontSize:14 }}>目前沒有操作記錄</div>
+        )}
+        {[...(activityLog || [])].reverse().map(log => {
+          const u  = (users || []).find(u => u.id === log.userId);
+          const lr = u ? safeRole(u.role) : null;
+          return (
+            <div key={log.id} style={{ ...S.card, display:"flex", gap:10, alignItems:"flex-start" }}>
+              {u
+                ? <AvatarBadge user={u} size={30}/>
+                : <div style={{ width:30, height:30, borderRadius:"50%", background:T.bgMuted, flexShrink:0, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13 }}>⚙</div>
+              }
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:13, color:T.text, lineHeight:1.5 }}>
+                  <span style={{ color:lr?lr.color:T.textSub, fontWeight:600 }}>{u?.name || "系統"}</span>
+                  {" "}{log.action}
+                </div>
+                <div style={{ fontSize:12, color:T.textMuted, marginTop:2 }}>{toROC(log.timestamp, true)}</div>
+              </div>
+              {u && <span style={S.tag(lr ? lr.color : T.textMuted)}>{lr ? lr.badge : "◆"}</span>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+//  MAIN APP
+// ═══════════════════════════════════════════════════════
+function RentKeeperApp() {
+  const [data, setData] = useState(null);
+  const [user, setUser] = useState(null);
+  const [tab, setTab]   = useState("dashboard");
+  const [toast, setToast] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [showNotif, setShowNotif] = useState(false);
+  const [showReset, setShowReset] = useState(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      const d = await loadData();
+      if (d) setData(d);
+      else { await saveData(DEFAULT_DATA); setData(DEFAULT_DATA); }
+    })();
+  }, []);
+
+  const showToast = useCallback((msg, type="ok") => {
+    if (!mounted.current) return;
+    setToast({ msg, type });
+    setTimeout(() => { if (mounted.current) setToast(null); }, 2500);
+  }, []);
+
+  const updateData = useCallback((fn) => {
+    setData(prev => {
+      const next = fn(prev);
+      if (!next) return prev; // 防守 fn 回傳 null/undefined
+      (async () => { await saveData(next); if (mounted.current) { setSyncing(false); showToast("已儲存"); } })();
+      return next;
+    });
+    setSyncing(true);
+  }, [showToast]);
+
+  const handleLogin = (u) => {
+    setUser(u);
+    setData(d => {
+      if (!d) return d;
+      // viewer 是 synthetic user，不一定存在於 users 陣列，僅更新存在的帳號
+      const updUsers = d.users.some(x => x.id === u.id)
+        ? d.users.map(x => x.id===u.id?{...x,online:true}:x)
+        : d.users;
+      const upd = { ...d, users: updUsers, activityLog: [...d.activityLog, {id:uid(),userId:u.id,action:"登入系統",timestamp:nowISO()}] };
+      saveData(upd);
+      return upd;
+    });
+    showToast(`歡迎，${u.name}！`);
+  };
+
+  const handleLogout = () => {
+    setData(d => {
+      if (!d) return d;
+      const upd = { ...d, users: d.users.map(x => x.id===user.id?{...x,online:false}:x) };
+      saveData(upd);
+      return upd;
+    });
+    setUser(null); setTab("dashboard"); setNotifications([]); setSyncing(false);
+  };
+
+  const handleReset = async () => {
+    const bl = await loadBaseline();
+    const target = bl || DEFAULT_DATA;
+    await saveData(target);
+    setData(target); setUser(null); setTab("dashboard"); setShowReset(false);
+  };
+
+  const handleSaveBaseline = async () => {
+    const snap = { ...data, users: data.users.map(u=>({...u,online:false})) };
+    await saveBaseline(snap); await saveData(snap);
+    showToast("✅ 已儲存為預設版本！");
+  };
+
+  if (!data) return <div style={{ minHeight:"100vh", background:T.bgSub, display:"flex", alignItems:"center", justifyContent:"center", color:T.textSub, fontSize:14, fontFamily:"'Noto Sans TC',sans-serif" }}>載入中...</div>;
+  if (!user)  return <LoginScreen users={data.users} tenants={data.tenants} onLogin={handleLogin}/>;
+
+  const role = safeRole(user.role);
+  const unpaidCnt = (data.bills||[]).filter(b=>b.status==="unpaid").length;
+  const repairCnt = (data.repairs||[]).filter(r=>r.status==="pending").length;
+
+  const ALL_TABS = [
+    {id:"dashboard",label:"總覽",icon:"chart"},
+    {id:"rooms",    label:"房源",icon:"building"},
+    {id:"tenants",  label:"房客",icon:"users"},
+    {id:"bills",    label:"帳務",icon:"dollar",badge:unpaidCnt},
+    {id:"repairs",  label:"報修",icon:"tool",badge:repairCnt},
+    {id:"report",   label:"報表",icon:"file"},
+    {id:"users",    label:"人員",icon:"shield"},
+    {id:"log",      label:"記錄",icon:"activity"},
+  ];
+  const tabs = ALL_TABS.filter(t=>role.pages.includes(t.id));
+  const active = role.pages.includes(tab)?tab:(tabs[0]?.id||"dashboard");
+
+  return (
+    <div style={{ minHeight:"100vh", background:T.bgSub, fontFamily:"'Noto Sans TC','PingFang TC',sans-serif", color:T.text, fontSize:15 }}>
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} *{box-sizing:border-box} select option{background:#fff;color:#111827}`}</style>
+
+      {/* Header */}
+      <div style={{ background:T.bg, borderBottom:`1px solid ${T.border}`, padding:"10px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", position:"sticky", top:0, zIndex:200 }}>
+        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+          <div style={{ width:30, height:30, background:`linear-gradient(135deg,${T.accent},#3b82f6)`, borderRadius:8, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff" }}><Icon n="home" s={15}/></div>
+          <span style={{ fontWeight:800, fontSize:13, color:T.text }}>家樂美房產管理顧問有限公司</span>
+          {syncing&&<div style={{ width:6, height:6, borderRadius:"50%", background:T.amber, animation:"pulse 1s infinite" }}/>}
+        </div>
+        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <div style={{ display:"flex" }}>{(data.users||[]).filter(u=>u.online).map(u=><AvatarBadge key={u.id} user={u} size={26}/>)}</div>
+          <button onClick={()=>{setShowNotif(v=>!v);setNotifications(n=>n.map(x=>({...x,read:true})));}} style={{ background:"none", border:"none", cursor:"pointer", color:T.textSub, padding:4, position:"relative" }}>
+            <Icon n="bell" s={20}/>
+            {notifications.some(n=>!n.read)&&<div style={{ position:"absolute", top:2, right:2, width:8, height:8, background:T.red, borderRadius:"50%", border:`2px solid ${T.bg}`, animation:"pulse 1.5s infinite" }}/>}
+          </button>
+          <AvatarBadge user={{...user,online:true}} size={28}/>
+          {role.canManageUsers&&<button onClick={()=>setShowReset(true)} style={{ background:"none", border:"none", cursor:"pointer", color:T.textSub, padding:4 }}><Icon n="refresh" s={17}/></button>}
+          <button onClick={handleLogout} style={{ background:"none", border:"none", cursor:"pointer", color:T.textSub, padding:4 }}><Icon n="logout" s={18}/></button>
+        </div>
+      </div>
+
+      {/* Notification Panel */}
+      {showNotif&&<div style={{ position:"fixed", top:52, right:0, width:"min(320px,100vw)", maxHeight:"60vh", background:T.bg, border:`1px solid ${T.border}`, borderRadius:"0 0 0 14px", zIndex:300, overflow:"hidden", display:"flex", flexDirection:"column", boxShadow:"0 8px 24px rgba(0,0,0,0.1)" }}>
+        <div style={{ padding:"12px 14px 10px", borderBottom:`1px solid ${T.border}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <span style={{ fontWeight:700, color:T.text, fontSize:14 }}>🔔 對話通知</span>
+          <div style={{ display:"flex", gap:8 }}>{notifications.length>0&&<button onClick={()=>setNotifications([])} style={{ background:"none", border:"none", color:T.textSub, fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>清除全部</button>}<button onClick={()=>setShowNotif(false)} style={{ background:"none", border:"none", color:T.textSub, cursor:"pointer" }}><Icon n="x" s={16}/></button></div>
+        </div>
+        <div style={{ overflowY:"auto", flex:1 }}>
+          {notifications.length===0?<div style={{ padding:28, textAlign:"center", color:T.textMuted, fontSize:13 }}>目前沒有新通知</div>
+            :notifications.map(n=>{const mr=safeRole(n.senderRole); return <div key={n.id} onClick={()=>{setShowNotif(false);setTab("rooms");}} style={{ padding:"10px 14px", borderBottom:`1px solid ${T.border}`, cursor:"pointer", background:n.read?"transparent":T.accentBg }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:3 }}>
+                <div style={{ width:24, height:24, borderRadius:"50%", background:mr.color+"22", border:`1px solid ${mr.color}44`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, fontWeight:700, color:mr.color, flexShrink:0 }}>{n.senderName?.[0]||"?"}</div>
+                <div style={{ flex:1 }}><div style={{ fontSize:13, color:T.text }}><span style={{ color:mr.color, fontWeight:600 }}>{n.senderName}</span><span style={{ color:T.textSub }}> 在 </span><span style={{ color:T.text, fontWeight:600 }}>{n.roomName}</span></div><div style={{ fontSize:12, color:T.textSub, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{n.text}</div></div>
+                {!n.read&&<div style={{ width:6, height:6, borderRadius:"50%", background:T.accent, flexShrink:0 }}/>}
+              </div>
+              <div style={{ fontSize:11, color:T.textMuted, paddingLeft:32 }}>{toROC(n.timestamp,true)}</div>
+            </div>;})}
+        </div>
+      </div>}
+
+      {/* Reset Modal */}
+      {showReset&&<Modal title="重置系統資料" onClose={()=>setShowReset(false)} width={360}><div style={{ textAlign:"center", padding:"8px 0 16px" }}><div style={{ width:52, height:52, borderRadius:"50%", background:T.redBg, border:`2px solid ${T.red}44`, display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 14px", color:T.red }}><Icon n="refresh" s={22}/></div><div style={{ color:T.text, fontSize:15, fontWeight:700, marginBottom:8 }}>確定要重置所有資料？</div><div style={{ color:T.textSub, fontSize:14, lineHeight:1.7, marginBottom:20 }}>這將恢復成系統預設狀態。<br/><span style={{ color:T.red, fontWeight:600 }}>此操作無法復原，請謹慎使用。</span></div><div style={{ display:"flex", gap:10 }}><button onClick={()=>setShowReset(false)} style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"10px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>取消</button><button onClick={handleReset} style={{ flex:1, background:T.red, color:"#fff", border:"none", borderRadius:8, padding:"10px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>確認重置</button></div></div></Modal>}
+
+      {/* Viewer Banner */}
+      {!role.canEdit&&<div style={{ background:T.bgMuted, borderBottom:`1px solid ${T.border}`, padding:"6px 16px", display:"flex", alignItems:"center", gap:8 }}><Icon n="lock" s={14}/><span style={{ fontSize:13, color:T.textSub }}>您目前為租客模式，僅能查看資料，無法編輯</span></div>}
+
+      {/* Content */}
+      <div style={{ padding:"16px 16px 160px", maxWidth:640, margin:"0 auto" }}>
+        {active==="dashboard"&&<Dashboard data={data} currentUser={user} onUpdate={updateData}/>}
+        {active==="rooms"    &&<Rooms     data={data} currentUser={user} onUpdate={updateData}/>}
+        {active==="tenants"  &&<Tenants   data={data} currentUser={user} onUpdate={updateData}/>}
+        {active==="bills"    &&<Bills     data={data} currentUser={user} onUpdate={updateData}/>}
+        {active==="repairs"  &&<Repairs   data={data} currentUser={user} onUpdate={updateData}/>}
+        {active==="report"   &&<Report    bills={data.bills} rooms={data.rooms} tenants={data.tenants}/>}
+        {active==="users"    &&<UserManagement data={data} currentUser={user} onUpdate={updateData}/>}
+        {active==="log"      &&<ActivityLog    data={data} currentUser={user} onUpdate={updateData}/>}
+      </div>
+
+      {/* Action Bar */}
+      {(role.canManageUsers||((role.canViewFinance)&&active==="report"))&&<div style={{ position:"fixed", bottom:62, left:0, right:0, zIndex:199, padding:"0 16px 6px", display:"flex", gap:10, maxWidth:640, margin:"0 auto" }}>
+        {active==="report"?null:role.canManageUsers?<button onClick={handleSaveBaseline} style={{ flex:1, background:T.bg, color:T.accent, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 8px", fontSize:14, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:5, fontFamily:"inherit" }}><Icon n="check" s={15}/> 修改並儲存</button>:null}
+      </div>}
+
+      {/* Bottom Nav */}
+      <div style={{ position:"fixed", bottom:0, left:0, right:0, background:T.bg, borderTop:`1px solid ${T.border}`, display:"flex", justifyContent:"space-around", padding:"8px 0 16px", zIndex:200 }}>
+        {tabs.map(t=>(
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{ background:"none", border:"none", cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:3, color:active===t.id?T.accent:T.textMuted, padding:"4px 6px", position:"relative", transition:"color 0.15s", fontFamily:"inherit" }}>
+            <Icon n={t.icon} s={20}/>
+            <span style={{ fontSize:11, fontWeight:active===t.id?700:500 }}>{t.label}</span>
+            {t.badge>0&&<div style={{ position:"absolute", top:0, right:0, minWidth:16, height:16, background:T.red, color:"#fff", borderRadius:99, fontSize:10, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px" }}>{t.badge}</div>}
+          </button>
+        ))}
+      </div>
+
+      {toast&&<Toast msg={toast.msg} type={toast.type}/>}
+    </div>
+  );
+}
+
+const _root = ReactDOM.createRoot(document.getElementById('root'));
+_root.render(React.createElement(RentKeeperApp));
+
   </script>
 </body>
 </html>
