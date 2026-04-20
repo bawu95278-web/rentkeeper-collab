@@ -1888,6 +1888,8 @@ function RentKeeperApp() {
   const [notifications, setNotifications] = useState([]);
   const [showNotif, setShowNotif] = useState(false);
   const [showReset, setShowReset] = useState(false);
+  const [viewAs, setViewAs]           = useState(null); // null | "admin" | "viewer"
+  const [showViewAsPicker, setShowViewAsPicker] = useState(false);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -1941,7 +1943,7 @@ function RentKeeperApp() {
       saveData(upd);
       return upd;
     });
-    setUser(null); setTab("dashboard"); setNotifications([]); setSyncing(false);
+    setUser(null); setTab("dashboard"); setNotifications([]); setSyncing(false); setViewAs(null); setShowViewAsPicker(false);
   };
 
   const handleReset = async () => {
@@ -1960,7 +1962,16 @@ function RentKeeperApp() {
   if (!data) return <div style={{ minHeight:"100vh", background:T.bgSub, display:"flex", alignItems:"center", justifyContent:"center", color:T.textSub, fontSize:14, fontFamily:"'Noto Sans TC',sans-serif" }}>載入中...</div>;
   if (!user)  return <LoginScreen users={data.users} tenants={data.tenants} onLogin={handleLogin}/>;
 
-  const role = safeRole(user.role);
+  const role         = safeRole(user.role);
+  const effectiveUser = viewAs ? { ...user, role: viewAs } : user;
+  const effectiveRole = safeRole(effectiveUser.role);
+  const isImpersonating = viewAs !== null;
+  const switchOptions = user.role === "superadmin"
+    ? [{ role:"admin",   label:"管理員視角",       color:T.blue },
+       { role:"viewer",  label:"租客視角（唯讀）", color:T.textMuted }]
+    : user.role === "admin"
+    ? [{ role:"viewer",  label:"租客視角（唯讀）", color:T.textMuted }]
+    : [];
   const unpaidCnt = (data.bills||[]).filter(b=>b.status==="unpaid").length;
   const repairCnt = (data.repairs||[]).filter(r=>r.status==="pending").length;
 
@@ -1974,8 +1985,8 @@ function RentKeeperApp() {
     {id:"users",    label:"人員",icon:"shield"},
     {id:"log",      label:"記錄",icon:"activity"},
   ];
-  const tabs = ALL_TABS.filter(t=>role.pages.includes(t.id));
-  const active = role.pages.includes(tab)?tab:(tabs[0]?.id||"dashboard");
+  const tabs = ALL_TABS.filter(t=>effectiveRole.pages.includes(t.id));
+  const active = effectiveRole.pages.includes(tab)?tab:(tabs[0]?.id||"dashboard");
 
   return (
     <div style={{ minHeight:"100vh", background:T.bgSub, fontFamily:"'Noto Sans TC','PingFang TC',sans-serif", color:T.text, fontSize:15 }}>
@@ -1995,6 +2006,32 @@ function RentKeeperApp() {
             {notifications.some(n=>!n.read)&&<div style={{ position:"absolute", top:2, right:2, width:8, height:8, background:T.red, borderRadius:"50%", border:`2px solid ${T.bg}`, animation:"pulse 1.5s infinite" }}/>}
           </button>
           <AvatarBadge user={{...user,online:true}} size={28}/>
+          {/* 身份切換按鈕 */}
+          {(switchOptions.length > 0 || isImpersonating) && (
+            <div style={{ position:"relative" }}>
+              <button onClick={()=>setShowViewAsPicker(v=>!v)}
+                style={{ background:isImpersonating?T.amberBg:T.bgMuted, color:isImpersonating?T.amber:T.textSub, border:`1px solid ${isImpersonating?T.amber+"55":T.border}`, borderRadius:7, padding:"4px 9px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", gap:4 }}>
+                <Icon n="users" s={13}/>
+                {isImpersonating ? safeRole(viewAs).label : "切換視角"}
+              </button>
+              {showViewAsPicker && (
+                <div style={{ position:"absolute", top:"calc(100% + 6px)", right:0, background:T.bg, border:`1px solid ${T.border}`, borderRadius:12, boxShadow:"0 8px 24px rgba(0,0,0,0.13)", zIndex:500, minWidth:168, overflow:"hidden" }}>
+                  {isImpersonating && (
+                    <button onClick={()=>{ setViewAs(null); setShowViewAsPicker(false); setTab("dashboard"); }}
+                      style={{ width:"100%", display:"flex", alignItems:"center", gap:8, padding:"11px 14px", background:"none", border:"none", borderBottom:`1px solid ${T.border}`, cursor:"pointer", fontSize:13, fontWeight:700, color:safeRole(user.role).color, fontFamily:"inherit" }}>
+                      ↩ 返回{safeRole(user.role).label}
+                    </button>
+                  )}
+                  {switchOptions.filter(o=>o.role!==viewAs).map(o=>(
+                    <button key={o.role} onClick={()=>{ setViewAs(o.role); setShowViewAsPicker(false); setTab(o.role==="viewer"?"rooms":"dashboard"); }}
+                      style={{ width:"100%", display:"flex", alignItems:"center", gap:8, padding:"11px 14px", background:"none", border:"none", cursor:"pointer", fontSize:13, color:o.color, fontFamily:"inherit" }}>
+                      👁 {o.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {role.canManageUsers&&<button onClick={()=>setShowReset(true)} style={{ background:"none", border:"none", cursor:"pointer", color:T.textSub, padding:4 }}><Icon n="refresh" s={17}/></button>}
           <button onClick={handleLogout} style={{ background:"none", border:"none", cursor:"pointer", color:T.textSub, padding:4 }}><Icon n="logout" s={18}/></button>
         </div>
@@ -2022,23 +2059,36 @@ function RentKeeperApp() {
       {/* Reset Modal */}
       {showReset&&<Modal title="重置系統資料" onClose={()=>setShowReset(false)} width={360}><div style={{ textAlign:"center", padding:"8px 0 16px" }}><div style={{ width:52, height:52, borderRadius:"50%", background:T.redBg, border:`2px solid ${T.red}44`, display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 14px", color:T.red }}><Icon n="refresh" s={22}/></div><div style={{ color:T.text, fontSize:15, fontWeight:700, marginBottom:8 }}>確定要重置所有資料？</div><div style={{ color:T.textSub, fontSize:14, lineHeight:1.7, marginBottom:20 }}>這將恢復成系統預設狀態。<br/><span style={{ color:T.red, fontWeight:600 }}>此操作無法復原，請謹慎使用。</span></div><div style={{ display:"flex", gap:10 }}><button onClick={()=>setShowReset(false)} style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"10px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>取消</button><button onClick={handleReset} style={{ flex:1, background:T.red, color:"#fff", border:"none", borderRadius:8, padding:"10px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>確認重置</button></div></div></Modal>}
 
+      {/* 身份視角切換提示橫幅 */}
+      {isImpersonating && (
+        <div style={{ background:T.amberBg, borderBottom:`1px solid ${T.amber}44`, padding:"7px 16px", display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:7 }}>
+            <span style={{ fontSize:14 }}>👁</span>
+            <span style={{ fontSize:13, color:T.amber, fontWeight:700 }}>正在以「{safeRole(viewAs).label}」視角瀏覽（預覽模式）</span>
+          </div>
+          <button onClick={()=>{ setViewAs(null); setTab("dashboard"); }}
+            style={{ background:"none", border:`1px solid ${T.amber}66`, borderRadius:7, color:T.amber, fontSize:12, fontWeight:700, padding:"3px 10px", cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
+            ↩ 返回{safeRole(user.role).label}
+          </button>
+        </div>
+      )}
       {/* Viewer Banner */}
-      {!role.canEdit&&<div style={{ background:T.bgMuted, borderBottom:`1px solid ${T.border}`, padding:"6px 16px", display:"flex", alignItems:"center", gap:8 }}><Icon n="lock" s={14}/><span style={{ fontSize:13, color:T.textSub }}>您目前為租客模式，僅能查看資料，無法編輯</span></div>}
+      {!effectiveRole.canEdit&&<div style={{ background:T.bgMuted, borderBottom:`1px solid ${T.border}`, padding:"6px 16px", display:"flex", alignItems:"center", gap:8 }}><Icon n="lock" s={14}/><span style={{ fontSize:13, color:T.textSub }}>您目前為租客模式，僅能查看資料，無法編輯</span></div>}
 
       {/* Content */}
       <div style={{ padding:"16px 16px 160px", maxWidth:640, margin:"0 auto" }}>
-        {active==="dashboard"&&<Dashboard data={data} currentUser={user} onUpdate={updateData}/>}
-        {active==="rooms"    &&<Rooms     data={data} currentUser={user} onUpdate={updateData}/>}
-        {active==="tenants"  &&<Tenants   data={data} currentUser={user} onUpdate={updateData}/>}
-        {active==="bills"    &&<Bills     data={data} currentUser={user} onUpdate={updateData}/>}
-        {active==="repairs"  &&<Repairs   data={data} currentUser={user} onUpdate={updateData}/>}
+        {active==="dashboard"&&<Dashboard data={data} currentUser={effectiveUser} onUpdate={updateData}/>}
+        {active==="rooms"    &&<Rooms     data={data} currentUser={effectiveUser} onUpdate={updateData}/>}
+        {active==="tenants"  &&<Tenants   data={data} currentUser={effectiveUser} onUpdate={updateData}/>}
+        {active==="bills"    &&<Bills     data={data} currentUser={effectiveUser} onUpdate={updateData}/>}
+        {active==="repairs"  &&<Repairs   data={data} currentUser={effectiveUser} onUpdate={updateData}/>}
         {active==="report"   &&<Report    bills={data.bills} rooms={data.rooms} tenants={data.tenants}/>}
         {active==="users"    &&<UserManagement data={data} currentUser={user} onUpdate={updateData}/>}
         {active==="log"      &&<ActivityLog    data={data} currentUser={user} onUpdate={updateData}/>}
       </div>
 
       {/* Action Bar */}
-      {(role.canManageUsers||((role.canViewFinance)&&active==="report"))&&<div style={{ position:"fixed", bottom:62, left:0, right:0, zIndex:199, padding:"0 16px 6px", display:"flex", gap:10, maxWidth:640, margin:"0 auto" }}>
+      {(role.canManageUsers||((effectiveRole.canViewFinance)&&active==="report"))&&<div style={{ position:"fixed", bottom:62, left:0, right:0, zIndex:199, padding:"0 16px 6px", display:"flex", gap:10, maxWidth:640, margin:"0 auto" }}>
         {active==="report"?null:role.canManageUsers?<button onClick={handleSaveBaseline} style={{ flex:1, background:T.bg, color:T.accent, border:`1px solid ${T.border}`, borderRadius:10, padding:"10px 8px", fontSize:14, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:5, fontFamily:"inherit" }}><Icon n="check" s={15}/> 修改並儲存</button>:null}
       </div>}
 
