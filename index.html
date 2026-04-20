@@ -1,49 +1,28 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="apple-mobile-web-app-title" content="家樂美房產管理" />
-  <title>家樂美房產管理顧問有限公司</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>家樂美房產管理系統</title>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-    body { font-family: 'Noto Sans TC', sans-serif; background: #f9fafb; }
-    #root { min-height: 100vh; }
-    input, select, textarea, button { font-family: inherit; }
-    ::-webkit-scrollbar { width: 4px; height: 4px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
-  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Noto Sans TC',sans-serif}</style>
 </head>
 <body>
   <div id="root"></div>
   <script>
+    // localStorage wrapper (window.storage)
     window.storage = {
-      get: function(key) {
-        var v = localStorage.getItem(key);
-        if (v === null) return Promise.reject(new Error("Key not found: " + key));
-        return Promise.resolve({ key: key, value: v });
-      },
-      set: function(key, value) {
-        try { localStorage.setItem(key, value); } catch(e) {}
-        return Promise.resolve({ key: key, value: value });
-      },
-      remove: function(key) {
-        try { localStorage.removeItem(key); } catch(e) {}
-        return Promise.resolve({ key: key, deleted: true });
-      }
+      get: (key) => Promise.resolve({ value: localStorage.getItem(key) }),
+      set: (key, value) => { localStorage.setItem(key, value); return Promise.resolve(); },
+      remove: (key) => { localStorage.removeItem(key); return Promise.resolve(); }
     };
   </script>
   <script type="text/babel" data-presets="react">
 const { useState, useEffect, useCallback, useRef } = React;
-
 // ═══════════════════════════════════════════════════════
 //  STORAGE (in-memory for JSX artifact environment)
 // ═══════════════════════════════════════════════════════
@@ -66,12 +45,12 @@ const safeRole = (r) => ROLES[r] || ROLES.viewer;
 // ═══════════════════════════════════════════════════════
 const DEFAULT_DATA = {
   users: [
-    { id: "u2", name: "林小雯", email: "staff@rentkeeper.tw", password: "staff123", role: "admin", avatar: "林", online: false },
-    { id: "u3", name: "陳建志", email: "view@rentkeeper.tw",  password: "view123",  role: "viewer", avatar: "陳", online: false },
-    { id: "u4", name: "憲哥",   email: "okdnhaco@gmail.com",  password: "LIN082921", role: "superadmin", avatar: "憲", online: false },
-    { id: "u5", name: "婉婷",   email: "0986311933",           password: "lin082921", role: "admin",      avatar: "婉", online: false },
-    { id: "u6", name: "管理員", email: "okdnhaco@gmail.com",  password: "lin082921", role: "admin", avatar: "管", online: false },
-    { id: "u7", name: "林意婷", email: "0921987265",           password: "0921987265", role: "admin", avatar: "林", online: false },
+    { id: "u2", name: "林小雯", email: "staff@rentkeeper.tw", password: "10176e7b7b24d317acfcf8d2064cfd2f24e154f7b5a96603077d5ef813d6a6b6", role: "admin", avatar: "林", online: false },
+    { id: "u3", name: "陳建志", email: "view@rentkeeper.tw",  password: "656d604dfdba41a262963cce53699bbc56cd7a2c0da1ad5ead45fc49214159d6", role: "viewer", avatar: "陳", online: false },
+    { id: "u4", name: "憲哥",   email: "okdnhaco@gmail.com",  password: "c6b3e728ce8a6c10e7e9f8eefbd42f0c9ee7d7c2097d0979aeeefdf38a9556af", role: "superadmin", avatar: "憲", online: false },
+    { id: "u5", name: "婉婷",   email: "0986311933",           password: "fd9762b82a6c016dd662cf07fbd6d7deecb56caf9908e375c3dcbb043ebbebba", role: "admin",      avatar: "婉", online: false },
+    { id: "u6", name: "管理員", email: "okdnhaco@gmail.com",  password: "fd9762b82a6c016dd662cf07fbd6d7deecb56caf9908e375c3dcbb043ebbebba", role: "admin", avatar: "管", online: false },
+    { id: "u7", name: "林意婷", email: "0921987265",           password: "55c12b2e9148678008527e3cbb79e8b7c9f3227d552c5fd53de581e8f566bd0d", role: "admin", avatar: "林", online: false },
   ],
   rooms: [
     { id: "r1", communityName: "101室", rent: 12000, status: "rented", tenantId: "t1", rentDay: "5", leaseStart: "2024-03-01", contractEnd: "2025-03-01", tenantContactName: "張小華", tenantContactPhone: "0912-345-678", cohabitants: [], renewals: [] },
@@ -149,6 +128,55 @@ const toROC = (s, t=false) => {
 };
 const toROCMonth = (s) => { if (!s) return "—"; const p=s.split("-"); return p.length>=2?`民國${parseInt(p[0])-1911}年${p[1]}月`:s; };
 const SL = { rented:"已出租", vacant:"空房", pending:"待處理", in_progress:"處理中", done:"已完成", paid:"已繳", unpaid:"未繳", rent:"租金", electric:"電費" };
+
+// ═══════════════════════════════════════════════════════
+//  SECURITY — SHA-256, PASSWORD MIGRATION, LOCKOUT
+// ═══════════════════════════════════════════════════════
+async function sha256(str) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+const isHashed = (s) => typeof s === "string" && /^[0-9a-f]{64}$/.test(s);
+async function migratePasswords(data) {
+  if (!data?.users) return data;
+  const needsMigration = data.users.some(u => u.password && !isHashed(u.password));
+  if (!needsMigration) return data;
+  const users = await Promise.all(data.users.map(async u => ({
+    ...u, password: isHashed(u.password) ? u.password : await sha256(u.password || "")
+  })));
+  return { ...data, users };
+}
+
+const LOCKOUT_KEY      = "rentkeeper-lockout-v1";
+const MAX_ATTEMPTS     = 5;
+const LOCKOUT_DURATION = 15 * 60 * 1000; // 15 分鐘
+function getLockout(id) {
+  try { const d = JSON.parse(localStorage.getItem(LOCKOUT_KEY) || "{}"); return d[id] || { attempts:0, lockedUntil:null }; }
+  catch { return { attempts:0, lockedUntil:null }; }
+}
+function setLockoutData(id, info) {
+  try { const d = JSON.parse(localStorage.getItem(LOCKOUT_KEY) || "{}"); d[id]=info; localStorage.setItem(LOCKOUT_KEY, JSON.stringify(d)); }
+  catch {}
+}
+function clearLockout(id) {
+  try { const d = JSON.parse(localStorage.getItem(LOCKOUT_KEY) || "{}"); delete d[id]; localStorage.setItem(LOCKOUT_KEY, JSON.stringify(d)); }
+  catch {}
+}
+function checkLocked(id) {
+  const lock = getLockout(id);
+  if (lock.lockedUntil && Date.now() < lock.lockedUntil) {
+    const remaining = Math.ceil((lock.lockedUntil - Date.now()) / 60000);
+    return `登入失敗次數過多，請 ${remaining} 分鐘後再試`;
+  }
+  return null;
+}
+function recordFailure(id) {
+  const lock = getLockout(id);
+  const attempts = (lock.attempts || 0) + 1;
+  const lockedUntil = attempts >= MAX_ATTEMPTS ? Date.now() + LOCKOUT_DURATION : null;
+  setLockoutData(id, { attempts, lockedUntil });
+  return attempts;
+}
 
 // ═══════════════════════════════════════════════════════
 //  THEME
@@ -329,8 +357,9 @@ function LoginScreen({ users, tenants, onLogin }) {
         setPhone(cred.phone || ""); setEmail(""); setPw("");
         setAutoFilled(true);
       } else {
-        setEmail(cred.email || ""); setPw(cred.pw || ""); setPhone("");
-        setAutoFilled(true);
+        // 不在輸入框顯示密碼 hash，僅帶入帳號
+        setEmail(cred.email || ""); setPw(""); setPhone("");
+        setAutoFilled(false);
       }
     } else {
       setPhone(""); setEmail(""); setPw("");
@@ -356,42 +385,60 @@ function LoginScreen({ users, tenants, onLogin }) {
     : (email.trim().length > 0 && pw.trim().length > 0);
 
   // ── 執行登入 ─────────────────────────────────────────
-  const doLogin = (overrides = {}) => {
+  const doLogin = async (overrides = {}) => {
     const fSel   = overrides.sel   ?? sel;
     const fEmail = overrides.email ?? email;
     const fPw    = overrides.pw    ?? pw;
     const fPhone = overrides.phone ?? phone;
     setLoading(true);
-    setTimeout(() => {
-      if (fSel === "tenant") {
-        const ni = fPhone.replace(/[-\s]/g, "");
-        const t  = (tenants||[]).find(t => (t.phone||"").replace(/[-\s]/g,"") === ni);
-        if (!t) { setErr("找不到此手機號碼的租客"); setLoading(false); return; }
-        // 儲存記住我憑證
+
+    // 鎖定檢查
+    const identifier = fSel === "tenant" ? fPhone.replace(/[-\s]/g,"") : fEmail;
+    const lockMsg = checkLocked(identifier);
+    if (lockMsg) { setErr(lockMsg); setLoading(false); return; }
+
+    await new Promise(r => setTimeout(r, 480));
+    if (fSel === "tenant") {
+      const ni = fPhone.replace(/[-\s]/g, "");
+      const t  = (tenants||[]).find(t => (t.phone||"").replace(/[-\s]/g,"") === ni);
+      if (!t) { recordFailure(ni); setErr("找不到此手機號碼的租客"); setLoading(false); return; }
+      // 儲存記住我憑證
+      const creds = loadCreds();
+      const curRemember = overrides.remember ?? rememberMe.tenant;
+      if (curRemember) { creds.tenant = { phone: t.phone, rememberMe: true }; saveCreds(creds); }
+      else { delete creds.tenant; saveCreds(creds); }
+      clearLockout(ni);
+      // 儲存快速帳號
+      persistAccount({ type:"tenant", name:t.name, phone:t.phone, role:"viewer", avatar:(t.name||"租")[0], color:"#6b7280", lastLogin:new Date().toISOString() });
+      setAccounts(loadAccounts());
+      onLogin({ id:t.id, name:t.name, email:t.email||"", role:"viewer", avatar:(t.name||"租")[0], online:true, _tenantId:t.id, _roomId:t.roomId });
+    } else {
+      // 密碼雜湊：prehashed → 直接用 pwHash；有 pw → 計算 sha256；否則計算輸入的 fPw
+      const pwHash = overrides.prehashed
+        ? overrides.pwHash
+        : await sha256(overrides.pw ?? fPw);
+      const u = (users||[]).find(u => u.email===fEmail && u.password===pwHash && u.role===fSel);
+      if (u) {
+        clearLockout(fEmail);
         const creds = loadCreds();
-        const curRemember = overrides.remember ?? rememberMe.tenant;
-        if (curRemember) { creds.tenant = { phone: t.phone, rememberMe: true }; saveCreds(creds); }
-        else { delete creds.tenant; saveCreds(creds); }
-        // 儲存快速帳號
-        persistAccount({ type:"tenant", name:t.name, phone:t.phone, role:"viewer", avatar:(t.name||"租")[0], color:"#6b7280", lastLogin:new Date().toISOString() });
+        const curRemember = overrides.remember ?? rememberMe[fSel];
+        // 儲存 hash 而非明文
+        if (curRemember) { creds[fSel] = { email:u.email, pwHash, rememberMe:true }; saveCreds(creds); }
+        else { delete creds[fSel]; saveCreds(creds); }
+        persistAccount({ type:fSel, name:u.name, email:u.email, role:u.role, avatar:u.avatar||u.name[0], color:safeRole(u.role).color, lastLogin:new Date().toISOString() });
         setAccounts(loadAccounts());
-        onLogin({ id:t.id, name:t.name, email:t.email||"", role:"viewer", avatar:(t.name||"租")[0], online:true, _tenantId:t.id, _roomId:t.roomId });
+        onLogin(u);
       } else {
-        const u = (users||[]).find(u => u.email===fEmail && u.password===fPw && u.role===fSel);
-        if (u) {
-          const creds = loadCreds();
-          const curRemember = overrides.remember ?? rememberMe[fSel];
-          if (curRemember) { creds[fSel] = { email:u.email, pw:fPw, rememberMe:true }; saveCreds(creds); }
-          else { delete creds[fSel]; saveCreds(creds); }
-          persistAccount({ type:fSel, name:u.name, email:u.email, role:u.role, avatar:u.avatar||u.name[0], color:safeRole(u.role).color, lastLogin:new Date().toISOString() });
-          setAccounts(loadAccounts());
-          onLogin(u);
+        const attempts = recordFailure(fEmail);
+        const remaining = MAX_ATTEMPTS - attempts;
+        if (remaining <= 0) {
+          setErr(`帳號或密碼錯誤，帳號已鎖定 15 分鐘`);
         } else {
-          setErr("帳號或密碼錯誤");
-          setLoading(false);
+          setErr(`帳號或密碼錯誤（還可嘗試 ${remaining} 次）`);
         }
+        setLoading(false);
       }
-    }, 480);
+    }
   };
 
   // ── 點擊快速帳號卡片 ─────────────────────────────────
@@ -412,11 +459,15 @@ function LoginScreen({ users, tenants, onLogin }) {
       }
     } else {
       // admin / superadmin：若有記住我直接登入，否則帶入 email 進表單
-      if (cred?.rememberMe && cred.email && cred.pw) {
-        setSel(acct.type); setEmail(cred.email); setPw(cred.pw); setPhone("");
+      if (cred?.rememberMe && cred.email && (cred.pwHash || cred.pw)) {
+        setSel(acct.type); setEmail(cred.email); setPw(""); setPhone("");
         setRememberMe(r => ({ ...r, [acct.type]: true }));
         setShowAccounts(false); setAutoFilled(true);
-        doLogin({ sel:acct.type, email:cred.email, pw:cred.pw, remember:true });
+        if (cred.pwHash) {
+          doLogin({ sel:acct.type, email:cred.email, pwHash:cred.pwHash, prehashed:true, remember:true });
+        } else {
+          doLogin({ sel:acct.type, email:cred.email, pw:cred.pw, remember:true });
+        }
       } else {
         setSel(acct.type); setEmail(acct.email||""); setPw(""); setPhone("");
         setAutoFilled(false); setShowAccounts(false);
@@ -1640,9 +1691,11 @@ function UserManagement({ data, currentUser, onUpdate }) {
   const [showAdd, setShowAdd] = useState(false);
   const [confirmDel, setConfirmDel] = useState(null);
   const [form, setForm] = useState({ name:"", email:"", password:"", role:"viewer" });
-  const save = () => {
+  const save = async () => {
     if(!form.name||!form.email) return;
-    const nu={id:uid(),...form,avatar:form.name[0],online:false,lastSeen:null};
+    const rawPw = form.password || form.email;
+    const hashedPw = await sha256(rawPw);
+    const nu={id:uid(),...form,password:hashedPw,avatar:form.name[0],online:false,lastSeen:null};
     onUpdate(d=>({...d,users:[...d.users,nu],activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`新增使用者 ${form.name}`,timestamp:nowISO()}]}));
     setShowAdd(false); setForm({name:"",email:"",password:"",role:"viewer"});
   };
@@ -1890,7 +1943,8 @@ function RentKeeperApp() {
   const [showReset, setShowReset] = useState(false);
   const [viewAs, setViewAs]           = useState(null); // null | "admin" | "viewer"
   const [showViewAsPicker, setShowViewAsPicker] = useState(false);
-  const mounted = useRef(true);
+  const mounted      = useRef(true);
+  const lastActivity = useRef(Date.now());
 
   useEffect(() => {
     mounted.current = true;
@@ -1899,9 +1953,15 @@ function RentKeeperApp() {
 
   useEffect(() => {
     (async () => {
-      const d = await loadData();
-      if (d) setData(d);
-      else { await saveData(DEFAULT_DATA); setData(DEFAULT_DATA); }
+      let d = await loadData();
+      if (d) {
+        d = await migratePasswords(d); // 將舊版明文密碼升級為 SHA-256
+        await saveData(d);
+      } else {
+        d = DEFAULT_DATA; // DEFAULT_DATA 已是 SHA-256
+        await saveData(d);
+      }
+      setData(d);
     })();
   }, []);
 
@@ -1958,6 +2018,30 @@ function RentKeeperApp() {
     await saveBaseline(snap); await saveData(snap);
     showToast("✅ 已儲存為預設版本！");
   };
+
+  // ── 閒置自動登出（60 分鐘）────────────────────────────
+  useEffect(() => {
+    if (!user) return;
+    const SESSION_TIMEOUT = 60 * 60 * 1000;
+    const touch = () => { lastActivity.current = Date.now(); };
+    window.addEventListener("mousemove", touch);
+    window.addEventListener("keydown",   touch);
+    window.addEventListener("click",     touch);
+    window.addEventListener("touchstart",touch);
+    const timer = setInterval(() => {
+      if (mounted.current && Date.now() - lastActivity.current > SESSION_TIMEOUT) {
+        handleLogout();
+        setTimeout(() => showToast("閒置超過 60 分鐘，已自動登出", "warn"), 100);
+      }
+    }, 60000);
+    return () => {
+      window.removeEventListener("mousemove", touch);
+      window.removeEventListener("keydown",   touch);
+      window.removeEventListener("click",     touch);
+      window.removeEventListener("touchstart",touch);
+      clearInterval(timer);
+    };
+  }, [user]); // eslint-disable-line
 
   if (!data) return <div style={{ minHeight:"100vh", background:T.bgSub, display:"flex", alignItems:"center", justifyContent:"center", color:T.textSub, fontSize:14, fontFamily:"'Noto Sans TC',sans-serif" }}>載入中...</div>;
   if (!user)  return <LoginScreen users={data.users} tenants={data.tenants} onLogin={handleLogin}/>;
@@ -2108,8 +2192,8 @@ function RentKeeperApp() {
   );
 }
 
-const _root = ReactDOM.createRoot(document.getElementById('root'));
-_root.render(React.createElement(RentKeeperApp));
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(RentKeeperApp));
 
   </script>
 </body>
