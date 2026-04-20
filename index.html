@@ -47,16 +47,7 @@ const { useState, useEffect, useCallback, useRef } = React;
 // ═══════════════════════════════════════════════════════
 //  STORAGE (in-memory for JSX artifact environment)
 // ═══════════════════════════════════════════════════════
-const memStore = {};
-const storage = {
-  get: (key) => {
-    const v = memStore[key];
-    if (v === undefined) return Promise.reject(new Error("Key not found: " + key));
-    return Promise.resolve({ key, value: v });
-  },
-  set: (key, value) => { memStore[key] = value; return Promise.resolve({ key, value }); },
-  remove: (key) => { delete memStore[key]; return Promise.resolve({ key, deleted: true }); },
-};
+const storage = window.storage;
 
 // ═══════════════════════════════════════════════════════
 //  ROLES
@@ -80,6 +71,7 @@ const DEFAULT_DATA = {
     { id: "u4", name: "憲哥",   email: "okdnhaco@gmail.com",  password: "LIN082921", role: "superadmin", avatar: "憲", online: false },
     { id: "u5", name: "婉婷",   email: "0986311933",           password: "lin082921", role: "admin",      avatar: "婉", online: false },
     { id: "u6", name: "管理員", email: "okdnhaco@gmail.com",  password: "lin082921", role: "admin", avatar: "管", online: false },
+    { id: "u7", name: "林意婷", email: "0921987265",           password: "0921987265", role: "admin", avatar: "林", online: false },
   ],
   rooms: [
     { id: "r1", communityName: "101室", rent: 12000, status: "rented", tenantId: "t1", rentDay: "5", leaseStart: "2024-03-01", contractEnd: "2025-03-01", tenantContactName: "張小華", tenantContactPhone: "0912-345-678", cohabitants: [], renewals: [] },
@@ -277,22 +269,22 @@ const CRED_KEY     = "rentkeeper-credentials-v1";
 const ACCOUNTS_KEY = "rentkeeper-quick-accounts-v1";
 
 function loadCreds() {
-  try { const v = memStore[CRED_KEY]; return v ? JSON.parse(v) : {}; } catch { return {}; }
+  try { const v = localStorage.getItem(CRED_KEY); return v ? JSON.parse(v) : {}; } catch { return {}; }
 }
 function saveCreds(obj) {
-  memStore[CRED_KEY] = JSON.stringify(obj);
+  try { localStorage.setItem(CRED_KEY, JSON.stringify(obj)); } catch {}
 }
 function loadAccounts() {
-  try { const v = memStore[ACCOUNTS_KEY]; return v ? JSON.parse(v) : []; } catch { return []; }
+  try { const v = localStorage.getItem(ACCOUNTS_KEY); return v ? JSON.parse(v) : []; } catch { return []; }
 }
 function persistAccount(entry) {
   const prev = loadAccounts();
   const uk = entry.email || entry.phone;
   const next = [entry, ...prev.filter(a => (a.email || a.phone) !== uk)].slice(0, 6);
-  memStore[ACCOUNTS_KEY] = JSON.stringify(next);
+  try { localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(next)); } catch {}
 }
 function dropAccount(uk) {
-  memStore[ACCOUNTS_KEY] = JSON.stringify(loadAccounts().filter(a => (a.email || a.phone) !== uk));
+  try { localStorage.setItem(ACCOUNTS_KEY, JSON.stringify(loadAccounts().filter(a => (a.email || a.phone) !== uk))); } catch {}
 }
 
 // ═══════════════════════════════════════════════════════
@@ -307,7 +299,7 @@ function LoginScreen({ users, tenants, onLogin }) {
   const roleLabel = { tenant:"租客", admin:"管理員", superadmin:"後台維修" };
   const roleColor = { tenant:"#6b7280", admin:"#2563eb", superadmin:"#dc2626" };
 
-  // ── 初始化：從 memStore 載入上次的記住我憑證 ────────
+  // ── 初始化：從 localStorage 載入上次的記住我憑證 ────────
   const initCreds = loadCreds();
   const [sel, setSel]         = useState(null);
   const [phone, setPhone]     = useState("");
@@ -1045,7 +1037,7 @@ function Rooms({ data, currentUser, onUpdate }) {
       if (form.tenantContactName) {
         const ex = d.tenants.find(t => t.linkedRoom === rid && !t.isCohabitant);
         mainId = ex ? ex.id : uid();
-        nt = [...nt, { id:mainId, name:form.tenantContactName, phone:form.tenantContactPhone||"", email:ex?.email||"", roomId:rid, moveIn:ex?.moveIn||"", contractEnd:form.contractEnd||"", deposit:ex?.deposit||0, linkedRoom:rid, isCohabitant:false }];
+        nt = [...nt, { id:mainId, name:form.tenantContactName, phone:form.tenantContactPhone||"", email:ex?.email||"", roomId:rid, moveIn:ex?.moveIn||form.leaseStart||"", contractEnd:form.contractEnd||"", deposit:ex?.deposit||0, linkedRoom:rid, isCohabitant:false }];
         nr = nr.map(r => r.id === rid ? { ...r, status:"rented", tenantId:mainId } : r);
         (form.cohabitants || []).forEach((c, i) => {
           if (c.name) {
