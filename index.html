@@ -14,7 +14,6 @@
 <body>
   <div id="root"></div>
   <script>
-    // localStorage wrapper (window.storage)
     window.storage = {
       get: (key) => Promise.resolve({ value: localStorage.getItem(key) }),
       set: (key, value) => { localStorage.setItem(key, value); return Promise.resolve(); },
@@ -1053,7 +1052,7 @@ function Rooms({ data, currentUser, onUpdate }) {
   const [expanded, setExpanded] = useState(() => { const s = new Set(); if (isViewer && viewerRoomId) s.add(viewerRoomId); return s; });
   const toggle = (id) => setExpanded(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
-  const emptyForm = () => { const t = todayStr(); return { communityName:"", address:"", ownerName:"", salesRep:"", rentDay:"5", rent:"", leaseStart:t, contractEnd:addOneYear(t), tenantContactName:"", tenantContactPhone:"", cohabitants:[], renewals:[], contractPhoto:"", ownerBankPhoto:"", autoRentRemind:false }; };
+  const emptyForm = () => { const t = todayStr(); return { communityName:"", address:"", ownerName:"", salesRep:"", rentDay:"5", rent:"", leaseStart:t, contractEnd:addOneYear(t), tenantContactName:"", tenantContactPhone:"", cohabitants:[], renewals:[], contractPhoto:"", ownerBankPhoto:"", autoRentRemind:false, rentalSubsidy:false, taxDeclaration:false, householdRegistration:false }; };
   const [showAdd, setShowAdd]     = useState(false);
   const [editRoom, setEditRoom]   = useState(null);
   const [form, setForm]           = useState(emptyForm);
@@ -1069,7 +1068,7 @@ function Rooms({ data, currentUser, onUpdate }) {
   const sf = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
 
   const openEdit = (room) => {
-    setForm({ communityName:room.communityName||"", address:room.address||"", ownerName:room.ownerName||"", salesRep:room.salesRep||"", rentDay:room.rentDay||"5", rent:room.rent||"", leaseStart:room.leaseStart||"", contractEnd:room.contractEnd||"", tenantContactName:room.tenantContactName||"", tenantContactPhone:room.tenantContactPhone||"", cohabitants:(room.cohabitants||[]).map(c=>({name:c.name||"",phone:c.phone||""})), renewals:(room.renewals||[]).map(r=>({renewStart:r.renewStart||"",renewEnd:r.renewEnd||""})), contractPhoto:room.contractPhoto||"", ownerBankPhoto:room.ownerBankPhoto||"", autoRentRemind:room.autoRentRemind||false });
+    setForm({ communityName:room.communityName||"", address:room.address||"", ownerName:room.ownerName||"", salesRep:room.salesRep||"", rentDay:room.rentDay||"5", rent:room.rent||"", leaseStart:room.leaseStart||"", contractEnd:room.contractEnd||"", tenantContactName:room.tenantContactName||"", tenantContactPhone:room.tenantContactPhone||"", cohabitants:(room.cohabitants||[]).map(c=>({name:c.name||"",phone:c.phone||""})), renewals:(room.renewals||[]).map(r=>({renewStart:r.renewStart||"",renewEnd:r.renewEnd||""})), contractPhoto:room.contractPhoto||"", ownerBankPhoto:room.ownerBankPhoto||"", autoRentRemind:room.autoRentRemind||false, rentalSubsidy:room.rentalSubsidy||false, taxDeclaration:room.taxDeclaration||false, householdRegistration:room.householdRegistration||false });
     setShowRenew((room.renewals || []).length > 0);
     setEditRoom(room); setShowAdd(true);
   };
@@ -1148,6 +1147,10 @@ function Rooms({ data, currentUser, onUpdate }) {
         const oldAutoRemind = prev.autoRentRemind ? "開啟" : "關閉";
         const newAutoRemind = form.autoRentRemind ? "開啟" : "關閉";
         if (oldAutoRemind !== newAutoRemind) diffs.push(`自動提醒：${oldAutoRemind} → ${newAutoRemind}`);
+        [["rentalSubsidy","租屋補助"],["taxDeclaration","是否報稅"],["householdRegistration","入戶籍"]].forEach(([k,l])=>{
+          const o = prev[k]?"是":"否", n = form[k]?"是":"否";
+          if (o !== n) diffs.push(`${l}：${o} → ${n}`);
+        });
         const oldRenewals = (prev.renewals || []).length;
         const newRenewals = (form.renewals || []).length;
         if (oldRenewals !== newRenewals) diffs.push(`續約記錄：${oldRenewals} 筆 → ${newRenewals} 筆`);
@@ -1333,7 +1336,24 @@ function Rooms({ data, currentUser, onUpdate }) {
             </div>
           )}
 
-          <div style={{ fontSize:12, color:T.blue, fontWeight:700, marginBottom:10, letterSpacing:"0.06em" }}>基本資訊</div>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+            <div style={{ fontSize:12, color:T.blue, fontWeight:700, letterSpacing:"0.06em" }}>基本資訊</div>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap", justifyContent:"flex-end" }}>
+              {[
+                { key:"rentalSubsidy",         label:"租屋補助", color:"#16a34a" },
+                { key:"taxDeclaration",         label:"是否報稅", color:"#d97706" },
+                { key:"householdRegistration",  label:"入戶籍",   color:"#7c3aed" },
+              ].map(({ key, label, color }) => (
+                <div key={key} onClick={()=>setForm(f=>({...f,[key]:!f[key]}))}
+                  style={{ display:"flex", alignItems:"center", gap:5, padding:"4px 10px", borderRadius:20, cursor:"pointer", userSelect:"none", border:`1.5px solid ${form[key]?color:T.border}`, background:form[key]?color+"1a":T.bgSub, transition:"all .15s" }}>
+                  <div style={{ width:14, height:14, borderRadius:3, border:`1.5px solid ${form[key]?color:T.borderMd}`, background:form[key]?color:T.bg, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                    {form[key]&&<span style={{ color:"#fff", fontSize:10, lineHeight:1 }}>✓</span>}
+                  </div>
+                  <span style={{ fontSize:11, fontWeight:600, color:form[key]?color:T.textSub }}>{label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
           {[["communityName","社區名稱 *"],["ownerName","屋主名字"],["salesRep","開發業務"],["address","地址"]].map(([k,l])=><div key={k}><label style={S.label}>{l}</label><input style={S.input} value={form[k]} onChange={sf(k)}/></div>)}
           <label style={S.label}>繳租日期</label>
           <select style={S.input} value={form.rentDay} onChange={sf("rentDay")}>{Array.from({length:31},(_,i)=>i+1).map(d=><option key={d} value={d}>{d} 號</option>)}</select>
