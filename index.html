@@ -14,10 +14,10 @@
 <body>
   <div id="root"></div>
   <script>
-    window.storage = {
-      get: (key) => Promise.resolve({ value: localStorage.getItem(key) }),
-      set: (key, value) => { localStorage.setItem(key, value); return Promise.resolve(); },
-      remove: (key) => { localStorage.removeItem(key); return Promise.resolve(); }
+    window.storage={
+      get:(key)=>Promise.resolve({value:localStorage.getItem(key)}),
+      set:(key,value)=>{localStorage.setItem(key,value);return Promise.resolve();},
+      remove:(key)=>{localStorage.removeItem(key);return Promise.resolve();}
     };
   </script>
   <script type="text/babel" data-presets="react">
@@ -1052,7 +1052,7 @@ function Rooms({ data, currentUser, onUpdate }) {
   const [expanded, setExpanded] = useState(() => { const s = new Set(); if (isViewer && viewerRoomId) s.add(viewerRoomId); return s; });
   const toggle = (id) => setExpanded(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
-  const emptyForm = () => { const t = todayStr(); return { communityName:"", address:"", ownerName:"", salesRep:"", rentDay:"5", rent:"", leaseStart:t, contractEnd:addOneYear(t), tenantContactName:"", tenantContactPhone:"", cohabitants:[], renewals:[], contractPhoto:"", ownerBankPhoto:"", autoRentRemind:false, rentalSubsidy:false, taxDeclaration:false, householdRegistration:false }; };
+  const emptyForm = () => { const t = todayStr(); return { communityName:"", address:"", ownerName:"", salesRep:"", rentDay:"5", rent:"", leaseStart:t, contractEnd:addOneYear(t), tenantContactName:"", tenantContactPhone:"", cohabitants:[], renewals:[], contractPhoto:"", ownerBankPhoto:"", autoRentRemind:false, rentalSubsidy:false, taxDeclaration:false, householdRegistration:false, roomType:"general", electricityType:"fixed", electricityFixedRate:"", waterType:"fixed", waterFixedRate:"" }; };
   const [showAdd, setShowAdd]     = useState(false);
   const [editRoom, setEditRoom]   = useState(null);
   const [form, setForm]           = useState(emptyForm);
@@ -1068,7 +1068,7 @@ function Rooms({ data, currentUser, onUpdate }) {
   const sf = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
 
   const openEdit = (room) => {
-    setForm({ communityName:room.communityName||"", address:room.address||"", ownerName:room.ownerName||"", salesRep:room.salesRep||"", rentDay:room.rentDay||"5", rent:room.rent||"", leaseStart:room.leaseStart||"", contractEnd:room.contractEnd||"", tenantContactName:room.tenantContactName||"", tenantContactPhone:room.tenantContactPhone||"", cohabitants:(room.cohabitants||[]).map(c=>({name:c.name||"",phone:c.phone||""})), renewals:(room.renewals||[]).map(r=>({renewStart:r.renewStart||"",renewEnd:r.renewEnd||""})), contractPhoto:room.contractPhoto||"", ownerBankPhoto:room.ownerBankPhoto||"", autoRentRemind:room.autoRentRemind||false, rentalSubsidy:room.rentalSubsidy||false, taxDeclaration:room.taxDeclaration||false, householdRegistration:room.householdRegistration||false });
+    setForm({ communityName:room.communityName||"", address:room.address||"", ownerName:room.ownerName||"", salesRep:room.salesRep||"", rentDay:room.rentDay||"5", rent:room.rent||"", leaseStart:room.leaseStart||"", contractEnd:room.contractEnd||"", tenantContactName:room.tenantContactName||"", tenantContactPhone:room.tenantContactPhone||"", cohabitants:(room.cohabitants||[]).map(c=>({name:c.name||"",phone:c.phone||""})), renewals:(room.renewals||[]).map(r=>({renewStart:r.renewStart||"",renewEnd:r.renewEnd||""})), contractPhoto:room.contractPhoto||"", ownerBankPhoto:room.ownerBankPhoto||"", autoRentRemind:room.autoRentRemind||false, rentalSubsidy:room.rentalSubsidy||false, taxDeclaration:room.taxDeclaration||false, householdRegistration:room.householdRegistration||false, roomType:room.roomType||"general", electricityType:room.electricityType||"fixed", electricityFixedRate:room.electricityFixedRate||"", waterType:room.waterType||"fixed", waterFixedRate:room.waterFixedRate||"" });
     setShowRenew((room.renewals || []).length > 0);
     setEditRoom(room); setShowAdd(true);
   };
@@ -1151,6 +1151,14 @@ function Rooms({ data, currentUser, onUpdate }) {
           const o = prev[k]?"是":"否", n = form[k]?"是":"否";
           if (o !== n) diffs.push(`${l}：${o} → ${n}`);
         });
+        const rtLabel = v => v==="shared"?"分租套房":"一般房型";
+        if ((prev.roomType||"general")!==(form.roomType||"general")) diffs.push(`房型：${rtLabel(prev.roomType)} → ${rtLabel(form.roomType)}`);
+        if (form.roomType==="shared") {
+          if ((prev.electricityType||"fixed")!==form.electricityType) diffs.push(`電費類型：${prev.electricityType||"fixed"}→${form.electricityType}`);
+          if (form.electricityType==="fixed"&&String(prev.electricityFixedRate||"")!==String(form.electricityFixedRate||"")) diffs.push(`電費單價：${prev.electricityFixedRate||"0"}→${form.electricityFixedRate}元/度`);
+          if ((prev.waterType||"fixed")!==form.waterType) diffs.push(`水費類型：${prev.waterType||"fixed"}→${form.waterType}`);
+          if (form.waterType==="fixed"&&String(prev.waterFixedRate||"")!==String(form.waterFixedRate||"")) diffs.push(`水費單價：${prev.waterFixedRate||"0"}→${form.waterFixedRate}元/人`);
+        }
         const oldRenewals = (prev.renewals || []).length;
         const newRenewals = (form.renewals || []).length;
         if (oldRenewals !== newRenewals) diffs.push(`續約記錄：${oldRenewals} 筆 → ${newRenewals} 筆`);
@@ -1354,7 +1362,79 @@ function Rooms({ data, currentUser, onUpdate }) {
               ))}
             </div>
           </div>
-          {[["communityName","社區名稱 *"],["ownerName","屋主名字"],["salesRep","開發業務"],["address","地址"]].map(([k,l])=><div key={k}><label style={S.label}>{l}</label><input style={S.input} value={form[k]} onChange={sf(k)}/></div>)}
+          {/* 社區名稱 */}
+          <div><label style={S.label}>社區名稱 *</label><input style={S.input} value={form.communityName} onChange={sf("communityName")}/></div>
+
+          {/* 房型選擇 */}
+          <label style={S.label}>房型</label>
+          <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+            {[["general","一般房型"],["shared","分租套房"]].map(([val,lbl])=>(
+              <button key={val} type="button" onClick={()=>setForm(f=>({...f,roomType:val}))}
+                style={{ flex:1, padding:"9px", borderRadius:8, border:`1.5px solid ${form.roomType===val?T.accent:T.border}`, background:form.roomType===val?T.accentBg:T.bg, color:form.roomType===val?T.accent:T.textSub, fontWeight:form.roomType===val?700:500, fontSize:13, cursor:"pointer", fontFamily:"inherit", transition:"all .15s" }}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+
+          {/* 分租套房：水電費設定 */}
+          {form.roomType==="shared"&&(
+            <div style={{ background:T.bgSub, border:`1px solid ${T.border}`, borderRadius:10, padding:"12px 14px", marginBottom:12 }}>
+              <div style={{ fontSize:12, color:T.accent, fontWeight:700, marginBottom:10, letterSpacing:"0.04em" }}>💡 水電費設定</div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
+                {/* 電費 */}
+                <div>
+                  <div style={{ fontSize:12, fontWeight:700, color:T.text, marginBottom:8 }}>⚡ 電費</div>
+                  <div style={{ display:"flex", gap:6, marginBottom:8 }}>
+                    {[["fixed","固定式"],["floating","浮動式"]].map(([val,lbl])=>(
+                      <button key={val} type="button" onClick={()=>setForm(f=>({...f,electricityType:val}))}
+                        style={{ flex:1, padding:"6px 4px", borderRadius:6, border:`1.5px solid ${form.electricityType===val?"#d97706":T.border}`, background:form.electricityType===val?"#fffbeb":T.bg, color:form.electricityType===val?"#d97706":T.textSub, fontWeight:600, fontSize:12, cursor:"pointer", fontFamily:"inherit", transition:"all .12s" }}>
+                        {lbl}
+                      </button>
+                    ))}
+                  </div>
+                  {form.electricityType==="fixed"?(
+                    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                      <span style={{ fontSize:12, color:T.textSub, whiteSpace:"nowrap" }}>1度 =</span>
+                      <input type="number" step="0.01" min="0" value={form.electricityFixedRate} onChange={e=>setForm(f=>({...f,electricityFixedRate:e.target.value}))} style={{ ...S.input, marginBottom:0, flex:1, minWidth:0 }} placeholder="0.00"/>
+                      <span style={{ fontSize:12, color:T.textSub }}>元</span>
+                    </div>
+                  ):(
+                    <div style={{ background:"#fffbeb", border:`1px solid #fcd34d`, borderRadius:7, padding:"8px 10px" }}>
+                      <div style={{ fontSize:11, color:"#d97706", fontWeight:700 }}>浮動式</div>
+                      <div style={{ fontSize:11, color:T.textSub, marginTop:3, lineHeight:1.5 }}>每期帳單時輸入當期每度電費金額</div>
+                    </div>
+                  )}
+                </div>
+                {/* 水費 */}
+                <div>
+                  <div style={{ fontSize:12, fontWeight:700, color:T.text, marginBottom:8 }}>💧 水費</div>
+                  <div style={{ display:"flex", gap:6, marginBottom:8 }}>
+                    {[["fixed","固定式"],["floating","浮動式"]].map(([val,lbl])=>(
+                      <button key={val} type="button" onClick={()=>setForm(f=>({...f,waterType:val}))}
+                        style={{ flex:1, padding:"6px 4px", borderRadius:6, border:`1.5px solid ${form.waterType===val?T.blue:T.border}`, background:form.waterType===val?T.accentBg:T.bg, color:form.waterType===val?T.blue:T.textSub, fontWeight:600, fontSize:12, cursor:"pointer", fontFamily:"inherit", transition:"all .12s" }}>
+                        {lbl}
+                      </button>
+                    ))}
+                  </div>
+                  {form.waterType==="fixed"?(
+                    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                      <span style={{ fontSize:12, color:T.textSub, whiteSpace:"nowrap" }}>1人 =</span>
+                      <input type="number" step="0.01" min="0" value={form.waterFixedRate} onChange={e=>setForm(f=>({...f,waterFixedRate:e.target.value}))} style={{ ...S.input, marginBottom:0, flex:1, minWidth:0 }} placeholder="0.00"/>
+                      <span style={{ fontSize:12, color:T.textSub }}>元</span>
+                    </div>
+                  ):(
+                    <div style={{ background:T.accentBg, border:`1px solid #93c5fd`, borderRadius:7, padding:"8px 10px" }}>
+                      <div style={{ fontSize:11, color:T.blue, fontWeight:700 }}>浮動式</div>
+                      <div style={{ fontSize:11, color:T.textSub, marginTop:3, lineHeight:1.5 }}>每期帳單時輸入當期水費金額</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 其餘基本欄位 */}
+          {[["ownerName","屋主名字"],["salesRep","開發業務"],["address","地址"]].map(([k,l])=><div key={k}><label style={S.label}>{l}</label><input style={S.input} value={form[k]} onChange={sf(k)}/></div>)}
           <label style={S.label}>繳租日期</label>
           <select style={S.input} value={form.rentDay} onChange={sf("rentDay")}>{Array.from({length:31},(_,i)=>i+1).map(d=><option key={d} value={d}>{d} 號</option>)}</select>
           <div onClick={()=>setForm(f=>({...f,autoRentRemind:!f.autoRentRemind}))} style={{ display:"flex", alignItems:"center", gap:10, background:form.autoRentRemind?T.accentBg:T.bgSub, border:`1px solid ${form.autoRentRemind?T.accent:T.border}`, borderRadius:8, padding:"10px 14px", marginBottom:12, cursor:"pointer", userSelect:"none" }}>
