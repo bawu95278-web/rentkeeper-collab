@@ -1300,7 +1300,10 @@ function Rooms({ data, currentUser, onUpdate }) {
                   </div>
                   {(room.renewals||[]).length>0 && <div style={{ marginBottom:10, background:T.accentBg, border:`1px solid ${T.accent}33`, borderRadius:8, padding:"10px 12px" }}><div style={{ fontSize:11, color:T.accent, fontWeight:700, marginBottom:8 }}>🔄 續約記錄</div>{(room.renewals||[]).map((rv,i)=><div key={i} style={{ display:"flex", gap:8, marginBottom:i<room.renewals.length-1?8:0 }}><div style={{ background:T.bg, borderRadius:6, padding:"6px 10px", border:`1px solid ${T.border}`, flex:1 }}><div style={{ fontSize:10, color:T.textMuted, fontWeight:600, marginBottom:1 }}>第{i+1}次·起租</div><div style={{ fontSize:13, fontWeight:600, color:T.text }}>{toROC(rv.renewStart)||"—"}</div></div><div style={{ background:T.bg, borderRadius:6, padding:"6px 10px", border:`1px solid ${T.border}`, flex:1 }}><div style={{ fontSize:10, color:T.textMuted, fontWeight:600, marginBottom:1 }}>第{i+1}次·到期</div><div style={{ fontSize:13, fontWeight:600, color:T.text }}>{toROC(rv.renewEnd)||"—"}</div></div></div>)}</div>}
                   {(room.contractPhoto || room.ownerBankPhoto) && <div style={{ display:"flex", gap:8, marginBottom:10 }}>
-                    {room.contractPhoto&&<button onClick={()=>setViewPhoto(room.contractPhoto)} style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:7, padding:"7px", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>📄 租約照片</button>}
+                    {room.contractPhoto&&<div style={{ flex:1, display:"flex", gap:4 }}>
+                      <button onClick={()=>setViewPhoto(room.contractPhoto)} style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:7, padding:"7px", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>📄 租約電子檔</button>
+                      <a href={room.contractPhoto} download="租約電子檔.jpg" title="下載" style={{ background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:7, padding:"7px 10px", fontSize:13, display:"flex", alignItems:"center", textDecoration:"none" }}>⬇️</a>
+                    </div>}
                     {room.ownerBankPhoto&&<div style={{ flex:1, display:"flex", gap:4 }}>
                       <button onClick={()=>setViewPhoto(room.ownerBankPhoto)} style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:7, padding:"7px", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>🏦 匯款帳號</button>
                       <a href={room.ownerBankPhoto} download="屋主匯款帳號.jpg" title="下載" style={{ background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:7, padding:"7px 10px", fontSize:13, display:"flex", alignItems:"center", textDecoration:"none" }}>⬇️</a>
@@ -1478,7 +1481,7 @@ function Rooms({ data, currentUser, onUpdate }) {
           {/* 照片區 */}
           <div style={{ fontSize:12, color:T.blue, fontWeight:700, marginBottom:10, marginTop:4, letterSpacing:"0.06em" }}>照片</div>
           <div style={{ marginBottom:10 }}>
-            <label style={S.label}>租約照片</label>
+            <label style={S.label}>租約電子檔 <span style={{ fontWeight:400, color:T.textMuted }}>（所有人可讀取下載）</span></label>
             <input ref={fileRef} type="file" accept="image/*" onChange={e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>setForm(fm=>({...fm,contractPhoto:ev.target.result})); r.readAsDataURL(f); }} style={{ display:"none" }}/>
             <button onClick={()=>fileRef.current?.click()} style={{ ...S.btn(T.textSub,true), width:"100%", justifyContent:"center", marginBottom:4 }}>
               {form.contractPhoto ? "✅ 已上傳（點擊更換）" : "選擇照片"}
