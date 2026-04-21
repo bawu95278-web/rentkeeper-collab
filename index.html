@@ -1179,11 +1179,15 @@ function Rooms({ data, currentUser, onUpdate }) {
   const [expanded, setExpanded] = useState(() => { const s = new Set(); if (isViewer && viewerRoomId) s.add(viewerRoomId); return s; });
   const toggle = (id) => setExpanded(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
-  const emptyForm = () => { const t = todayStr(); return { communityName:"", address:"", ownerName:"", salesRep:"", rentDay:"5", rent:"", leaseStart:t, contractEnd:addOneYear(t), tenantContactName:"", tenantContactPhone:"", cohabitants:[], renewals:[], contractPhoto:"", ownerBankPhoto:"", inspectionPhotos:[], autoRentRemind:false, rentalSubsidy:false, taxDeclaration:false, householdRegistration:false, roomType:"general", electricityType:"fixed", electricityFixedRate:"", waterType:"fixed", waterFixedRate:"", assignedAdmins:[] }; };
+  const emptyForm = () => { const t = todayStr(); return { communityName:"", address:"", ownerName:"", salesRep:"", rentDay:"5", rent:"", leaseStart:t, contractEnd:addOneYear(t), tenantContactName:"", tenantContactPhone:"", cohabitants:[], renewals:[], contractPhoto:"", ownerBankPhoto:"", inspectionPhotos:[], autoRentRemind:false, rentalSubsidy:false, taxDeclaration:false, householdRegistration:false, roomType:"general", electricityType:"fixed", electricityFixedRate:"", waterType:"fixed", waterFixedRate:"", assignedAdmins:[], parkingSpots:[] }; };
+  const newParkingSpot = (type, leaseStart, contractEnd) => ({ id:uid(), type, spotNo:"", linkedRoomId:"", rent:"", leaseStart:leaseStart||"", contractEnd:contractEnd||"", renewals:[] });
   const [showAdd, setShowAdd]     = useState(false);
   const [editRoom, setEditRoom]   = useState(null);
   const [form, setForm]           = useState(emptyForm);
   const [showRenew, setShowRenew] = useState(false);
+  const [showParking, setShowParking]       = useState(false);
+  const [openParkingIds, setOpenParkingIds] = useState(new Set());
+  const [parkingRenewIds, setParkingRenewIds] = useState(new Set());
   const [confirmDel, setConfirmDel]   = useState(null);
   const [viewPhoto, setViewPhoto]     = useState(null);
   const [openChat, setOpenChat]       = useState(null);
@@ -1204,8 +1208,10 @@ function Rooms({ data, currentUser, onUpdate }) {
   };
 
   const openEdit = (room) => {
-    setForm({ communityName:room.communityName||"", address:room.address||"", ownerName:room.ownerName||"", salesRep:room.salesRep||"", rentDay:room.rentDay||"5", rent:room.rent||"", leaseStart:room.leaseStart||"", contractEnd:room.contractEnd||"", tenantContactName:room.tenantContactName||"", tenantContactPhone:room.tenantContactPhone||"", cohabitants:(room.cohabitants||[]).map(c=>({name:c.name||"",phone:c.phone||""})), renewals:(room.renewals||[]).map(r=>({renewStart:r.renewStart||"",renewEnd:r.renewEnd||""})), contractPhoto:room.contractPhoto||"", ownerBankPhoto:room.ownerBankPhoto||"", inspectionPhotos:room.inspectionPhotos||[], autoRentRemind:room.autoRentRemind||false, rentalSubsidy:room.rentalSubsidy||false, taxDeclaration:room.taxDeclaration||false, householdRegistration:room.householdRegistration||false, roomType:room.roomType||"general", electricityType:room.electricityType||"fixed", electricityFixedRate:room.electricityFixedRate||"", waterType:room.waterType||"fixed", waterFixedRate:room.waterFixedRate||"", assignedAdmins:room.assignedAdmins||[] });
+    setForm({ communityName:room.communityName||"", address:room.address||"", ownerName:room.ownerName||"", salesRep:room.salesRep||"", rentDay:room.rentDay||"5", rent:room.rent||"", leaseStart:room.leaseStart||"", contractEnd:room.contractEnd||"", tenantContactName:room.tenantContactName||"", tenantContactPhone:room.tenantContactPhone||"", cohabitants:(room.cohabitants||[]).map(c=>({name:c.name||"",phone:c.phone||""})), renewals:(room.renewals||[]).map(r=>({renewStart:r.renewStart||"",renewEnd:r.renewEnd||""})), contractPhoto:room.contractPhoto||"", ownerBankPhoto:room.ownerBankPhoto||"", inspectionPhotos:room.inspectionPhotos||[], autoRentRemind:room.autoRentRemind||false, rentalSubsidy:room.rentalSubsidy||false, taxDeclaration:room.taxDeclaration||false, householdRegistration:room.householdRegistration||false, roomType:room.roomType||"general", electricityType:room.electricityType||"fixed", electricityFixedRate:room.electricityFixedRate||"", waterType:room.waterType||"fixed", waterFixedRate:room.waterFixedRate||"", assignedAdmins:room.assignedAdmins||[], parkingSpots:(room.parkingSpots||[]).map(s=>({...s,renewals:(s.renewals||[]).map(r=>({...r}))})) });
     setShowRenew((room.renewals || []).length > 0);
+    setShowParking((room.parkingSpots||[]).length > 0);
+    setOpenParkingIds(new Set()); setParkingRenewIds(new Set());
     setEditRoom(room); setShowAdd(true);
   };
 
@@ -1306,6 +1312,12 @@ function Rooms({ data, currentUser, onUpdate }) {
           const newNames = (form.assignedAdmins||[]).map(getName).join("、")||"（未指定）";
           diffs.push(`負責管理員：${oldNames} → ${newNames}`);
         }
+        const oldCar  = (prev.parkingSpots||[]).filter(s=>s.type==="car").length;
+        const newCar  = (form.parkingSpots||[]).filter(s=>s.type==="car").length;
+        const oldMoto = (prev.parkingSpots||[]).filter(s=>s.type==="moto").length;
+        const newMoto = (form.parkingSpots||[]).filter(s=>s.type==="moto").length;
+        if (oldCar!==newCar)   diffs.push(`汽車車位：${oldCar} 個 → ${newCar} 個`);
+        if (oldMoto!==newMoto) diffs.push(`機車車位：${oldMoto} 個 → ${newMoto} 個`);
 
         logAction = diffs.length > 0
           ? `【修改房源】「${form.communityName}」變更：${diffs.join("；")}`
@@ -1402,7 +1414,7 @@ function Rooms({ data, currentUser, onUpdate }) {
     <div>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
         <h2 style={S.title}>房源管理</h2>
-        {canEditRoom && <button onClick={()=>{setForm(emptyForm());setEditRoom(null);setShowAdd(true);setShowRenew(false);}} style={S.btn()}><Icon n="plus" s={13}/> 新增房源</button>}
+        {canEditRoom && <button onClick={()=>{setForm(emptyForm());setEditRoom(null);setShowAdd(true);setShowRenew(false);setShowParking(false);setOpenParkingIds(new Set());setParkingRenewIds(new Set());}} style={S.btn()}><Icon n="plus" s={13}/> 新增房源</button>}
       </div>
       <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
         {visibleRooms.map(room=>{
@@ -1448,6 +1460,39 @@ function Rooms({ data, currentUser, onUpdate }) {
                     ))}
                   </div>
                   {(room.renewals||[]).length>0 && <div style={{ marginBottom:10, background:T.accentBg, border:`1px solid ${T.accent}33`, borderRadius:8, padding:"10px 12px" }}><div style={{ fontSize:11, color:T.accent, fontWeight:700, marginBottom:8 }}>🔄 續約記錄</div>{(room.renewals||[]).map((rv,i)=><div key={i} style={{ display:"flex", gap:8, marginBottom:i<room.renewals.length-1?8:0 }}><div style={{ background:T.bg, borderRadius:6, padding:"6px 10px", border:`1px solid ${T.border}`, flex:1 }}><div style={{ fontSize:10, color:T.textMuted, fontWeight:600, marginBottom:1 }}>第{i+1}次·起租</div><div style={{ fontSize:13, fontWeight:600, color:T.text }}>{toROC(rv.renewStart)||"—"}</div></div><div style={{ background:T.bg, borderRadius:6, padding:"6px 10px", border:`1px solid ${T.border}`, flex:1 }}><div style={{ fontSize:10, color:T.textMuted, fontWeight:600, marginBottom:1 }}>第{i+1}次·到期</div><div style={{ fontSize:13, fontWeight:600, color:T.text }}>{toROC(rv.renewEnd)||"—"}</div></div></div>)}</div>}
+                  {/* ── 加租車位展示 ── */}
+                  {(room.parkingSpots||[]).length>0&&(()=>{
+                    const carSpots  = room.parkingSpots.filter(s=>s.type==="car");
+                    const motoSpots = room.parkingSpots.filter(s=>s.type==="moto");
+                    const SpotRow = ({spot})=>{
+                      const lr = spot.linkedRoomId?(data.rooms||[]).find(r=>r.id===spot.linkedRoomId):null;
+                      const dl = spot.contractEnd?daysUntil(spot.contractEnd):null;
+                      return (
+                        <div style={{ background:T.bgSub, border:`1px solid ${T.border}`, borderRadius:7, padding:"8px 10px", marginBottom:6 }}>
+                          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+                            <span style={{ fontSize:13, fontWeight:700, color:T.text }}>{spot.spotNo||"（未填編號）"}</span>
+                            {spot.rent&&<span style={{ fontSize:12, color:T.accent, fontWeight:600 }}>{fmt(spot.rent)}/月</span>}
+                          </div>
+                          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                            {lr&&<span style={{ fontSize:11, color:T.textSub }}>📍 {lr.communityName}{lr.address?` (${lr.address})`:""}</span>}
+                            {spot.leaseStart&&<span style={{ fontSize:11, color:T.textMuted }}>{toROC(spot.leaseStart)} 起</span>}
+                            {spot.contractEnd&&<span style={{ fontSize:11, color:dl!==null&&dl<=30&&dl>=0?T.red:T.textMuted }}>到 {toROC(spot.contractEnd)}{dl!==null?` (${dl}天)`:""}</span>}
+                          </div>
+                          {(spot.renewals||[]).length>0&&<div style={{ marginTop:4, fontSize:11, color:T.accent }}>🔄 已續約 {spot.renewals.length} 次</div>}
+                        </div>
+                      );
+                    };
+                    return (
+                      <div style={{ marginBottom:10, border:`1px solid ${T.border}`, borderRadius:9, overflow:"hidden" }}>
+                        <div style={{ fontSize:12, fontWeight:700, color:T.text, padding:"8px 12px", background:T.bgMuted, borderBottom:`1px solid ${T.border}` }}>🅿 加租車位（{room.parkingSpots.length} 個）</div>
+                        <div style={{ padding:"10px 12px" }}>
+                          {carSpots.length>0&&<><div style={{ fontSize:11, fontWeight:700, color:T.textSub, marginBottom:6 }}>🚗 汽車車位</div>{carSpots.map(s=><SpotRow key={s.id} spot={s}/>)}</>}
+                          {motoSpots.length>0&&<><div style={{ fontSize:11, fontWeight:700, color:T.textSub, marginTop:carSpots.length>0?8:0, marginBottom:6 }}>🛵 機車車位</div>{motoSpots.map(s=><SpotRow key={s.id} spot={s}/>)}</>}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {(room.contractPhoto || room.ownerBankPhoto) && <div style={{ display:"flex", gap:8, marginBottom:10 }}>
                     {room.contractPhoto&&<div style={{ flex:1, display:"flex", gap:4 }}>
                       <button onClick={()=>setViewPhoto(room.contractPhoto)} style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:7, padding:"7px", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>📄 租約電子檔</button>
@@ -1655,6 +1700,90 @@ function Rooms({ data, currentUser, onUpdate }) {
               <button onClick={()=>{ const prev=(form.renewals||[]).length>0?form.renewals[form.renewals.length-1].renewEnd:form.contractEnd; const ns=prev||todayStr(); setForm(f=>({...f,renewals:[...(f.renewals||[]),{renewStart:ns,renewEnd:addOneYear(ns)}]})); }} style={{ ...S.btn(T.accent,true), width:"100%", justifyContent:"center", fontSize:13, marginTop:4 }}><Icon n="plus" s={13}/> {(form.renewals||[]).length===0?"新增第一次續約":"新增下一年度續約"}</button>
             </div>}
           </div>
+          {/* ── 加租車位 ── */}
+          {(()=>{
+            const carSpots  = (form.parkingSpots||[]).filter(s=>s.type==="car");
+            const motoSpots = (form.parkingSpots||[]).filter(s=>s.type==="moto");
+            const totalCount = (form.parkingSpots||[]).length;
+            const toggleSpot = id => setOpenParkingIds(prev=>{ const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n; });
+            const toggleRenew = id => setParkingRenewIds(prev=>{ const n=new Set(prev); n.has(id)?n.delete(id):n.add(id); return n; });
+            const updateSpot = (id,patch) => setForm(f=>({...f,parkingSpots:f.parkingSpots.map(s=>s.id===id?{...s,...patch}:s)}));
+            const delSpot    = id => { setForm(f=>({...f,parkingSpots:f.parkingSpots.filter(s=>s.id!==id)})); setOpenParkingIds(prev=>{const n=new Set(prev);n.delete(id);return n;}); };
+            const addSpot    = type => { const ns=newParkingSpot(type,form.leaseStart,form.contractEnd); setForm(f=>({...f,parkingSpots:[...(f.parkingSpots||[]),ns]})); setOpenParkingIds(prev=>new Set([...prev,ns.id])); };
+            const ParkingSpotBlock = ({spot})=>{
+              const open=openParkingIds.has(spot.id);
+              const showR=parkingRenewIds.has(spot.id);
+              return (
+                <div style={{ border:`1px solid ${T.border}`, borderRadius:8, marginBottom:8, overflow:"hidden" }}>
+                  <div onClick={()=>toggleSpot(spot.id)} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"9px 12px", cursor:"pointer", background:open?T.bgMuted:T.bg, userSelect:"none" }}>
+                    <span style={{ fontSize:13, fontWeight:600, color:T.text }}>{spot.spotNo||(spot.type==="car"?"汽車車位":"機車車位")}</span>
+                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      {spot.rent&&<span style={{ fontSize:12, color:T.textMuted }}>{fmt(spot.rent)}/月</span>}
+                      <span style={{ color:T.textMuted, fontSize:11, transform:open?"rotate(180deg)":"rotate(0deg)", display:"inline-block", transition:"transform 0.2s" }}>▼</span>
+                    </div>
+                  </div>
+                  {open&&<div style={{ padding:"12px 13px", background:T.bg, borderTop:`1px solid ${T.border}` }}>
+                    <label style={S.label}>車位編號 <span style={{ fontWeight:400, color:T.textMuted }}>（例如 B1-132號）</span></label>
+                    <input style={S.input} value={spot.spotNo} placeholder="B1-132" onChange={e=>updateSpot(spot.id,{spotNo:e.target.value})}/>
+                    {(isSA||isAdmin)&&<>
+                      <label style={S.label}>車位歸屬房源</label>
+                      <select style={{ ...S.input, marginBottom:10 }} value={spot.linkedRoomId} onChange={e=>updateSpot(spot.id,{linkedRoomId:e.target.value})}>
+                        <option value="">— 請選擇房源（可留空）—</option>
+                        {(data.rooms||[]).map(r=><option key={r.id} value={r.id}>{r.communityName}{r.address?` (${r.address})`:""}</option>)}
+                      </select>
+                    </>}
+                    <label style={S.label}>車位租金（元/月）</label>
+                    <input style={S.input} type="text" inputMode="decimal" value={spot.rent} placeholder="0" onChange={e=>updateSpot(spot.id,{rent:e.target.value})}/>
+                    <label style={S.label}>起租日</label>
+                    <ROCDateInput value={spot.leaseStart} onChange={e=>updateSpot(spot.id,{leaseStart:e.target.value,contractEnd:addOneYear(e.target.value)})}/>
+                    <label style={S.label}>到期日</label>
+                    <ROCDateInput value={spot.contractEnd} onChange={e=>updateSpot(spot.id,{contractEnd:e.target.value})}/>
+                    {/* 車位續約 */}
+                    <div style={{ border:`1px solid ${T.border}`, borderRadius:7, marginBottom:10, overflow:"hidden" }}>
+                      <div onClick={()=>toggleRenew(spot.id)} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"8px 11px", cursor:"pointer", background:showR?T.accentBg:T.bgMuted, userSelect:"none" }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:6 }}><span style={{ fontSize:12, fontWeight:700, color:showR?T.accent:T.text }}>🔄 車位續約資料</span>{(spot.renewals||[]).length>0&&<span style={{ background:T.accent, color:"#fff", fontSize:10, fontWeight:700, borderRadius:99, padding:"1px 6px" }}>{spot.renewals.length} 筆</span>}</div>
+                        <span style={{ color:T.textMuted, fontSize:11, transform:showR?"rotate(180deg)":"rotate(0deg)", display:"inline-block", transition:"transform 0.2s" }}>▼</span>
+                      </div>
+                      {showR&&<div style={{ padding:"10px 11px", background:T.bg, borderTop:`1px solid ${T.border}` }}>
+                        {(spot.renewals||[]).length===0?<div style={{ textAlign:"center", color:T.textMuted, fontSize:12, padding:"6px 0" }}>尚無續約記錄</div>:(spot.renewals||[]).map((rv,ri)=><div key={ri} style={{ background:T.bgSub, border:`1px solid ${T.border}`, borderRadius:7, padding:"8px 10px", marginBottom:8 }}>
+                          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}><span style={{ fontSize:11, fontWeight:700, color:T.accent }}>第 {ri+1} 次續約</span><button onClick={()=>updateSpot(spot.id,{renewals:(spot.renewals||[]).filter((_,j)=>j!==ri)})} style={{ background:T.redBg, color:T.red, border:"none", borderRadius:5, padding:"2px 7px", fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>刪除</button></div>
+                          <label style={S.label}>續約起租日</label><ROCDateInput value={rv.renewStart} onChange={e=>updateSpot(spot.id,{renewals:(spot.renewals||[]).map((r,j)=>j===ri?{renewStart:e.target.value,renewEnd:addOneYear(e.target.value)}:r)})}/>
+                          <label style={{ ...S.label, marginBottom:0 }}>續約到期日</label><ROCDateInput value={rv.renewEnd} onChange={e=>updateSpot(spot.id,{renewals:(spot.renewals||[]).map((r,j)=>j===ri?{...r,renewEnd:e.target.value}:r)})}/>
+                        </div>)}
+                        <button onClick={()=>{ const prev=(spot.renewals||[]).length>0?spot.renewals[spot.renewals.length-1].renewEnd:spot.contractEnd; const ns=prev||todayStr(); updateSpot(spot.id,{renewals:[...(spot.renewals||[]),{renewStart:ns,renewEnd:addOneYear(ns)}]}); }} style={{ ...S.btn(T.accent,true), width:"100%", justifyContent:"center", fontSize:12, marginTop:2 }}><Icon n="plus" s={12}/> 新增續約</button>
+                      </div>}
+                    </div>
+                    <button onClick={()=>delSpot(spot.id)} style={{ ...S.btn(T.red,true), width:"100%", justifyContent:"center", fontSize:12 }}>🗑 刪除此車位</button>
+                  </div>}
+                </div>
+              );
+            };
+            return (
+              <div style={{ border:`1px solid ${T.border}`, borderRadius:9, marginBottom:14, overflow:"hidden" }}>
+                <div onClick={()=>setShowParking(v=>!v)} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 13px", cursor:"pointer", background:showParking?T.accentBg:T.bgMuted, userSelect:"none" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:7 }}><span style={{ fontSize:13, fontWeight:700, color:showParking?T.accent:T.text }}>🅿 是否加租其他車位</span>{totalCount>0&&<span style={{ background:T.accent, color:"#fff", fontSize:11, fontWeight:700, borderRadius:99, padding:"1px 7px" }}>{totalCount} 個</span>}</div>
+                  <span style={{ color:T.textMuted, fontSize:11, transform:showParking?"rotate(180deg)":"rotate(0deg)", display:"inline-block", transition:"transform 0.2s" }}>▼</span>
+                </div>
+                {showParking&&<div style={{ padding:"12px 13px", background:T.bg, borderTop:`1px solid ${T.border}` }}>
+                  {/* 汽車車位 */}
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
+                    <span style={{ fontSize:12, fontWeight:700, color:T.text }}>🚗 汽車車位</span>
+                    <button onClick={()=>addSpot("car")} style={{ ...S.btn(T.blue,true), fontSize:11, padding:"3px 10px" }}><Icon n="plus" s={11}/> 新增</button>
+                  </div>
+                  {carSpots.length===0&&<div style={{ textAlign:"center", color:T.textMuted, fontSize:12, padding:"6px 0 10px" }}>尚無汽車車位</div>}
+                  {carSpots.map(s=><ParkingSpotBlock key={s.id} spot={s}/>)}
+                  {/* 機車車位 */}
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:4, marginBottom:8 }}>
+                    <span style={{ fontSize:12, fontWeight:700, color:T.text }}>🛵 機車車位</span>
+                    <button onClick={()=>addSpot("moto")} style={{ ...S.btn(T.blue,true), fontSize:11, padding:"3px 10px" }}><Icon n="plus" s={11}/> 新增</button>
+                  </div>
+                  {motoSpots.length===0&&<div style={{ textAlign:"center", color:T.textMuted, fontSize:12, padding:"6px 0 4px" }}>尚無機車車位</div>}
+                  {motoSpots.map(s=><ParkingSpotBlock key={s.id} spot={s}/>)}
+                </div>}
+              </div>
+            );
+          })()}
+
           <div style={{ fontSize:12, color:T.blue, fontWeight:700, marginBottom:10, letterSpacing:"0.06em" }}>租客聯絡</div>
           {[["tenantContactName","主租客姓名"],["tenantContactPhone","主租客電話"]].map(([k,l])=><div key={k}><label style={S.label}>{l}</label><input style={S.input} value={form[k]} onChange={sf(k)}/></div>)}
           {(form.cohabitants||[]).map((c,i)=><div key={i} style={{ background:T.bgSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"10px 12px", marginBottom:8 }}>
