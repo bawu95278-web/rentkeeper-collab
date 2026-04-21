@@ -21,7 +21,8 @@
     };
   </script>
   <script type="text/babel" data-presets="react">
-const { useState, useEffect, useCallback, useRef } = React;
+import { useState, useEffect, useCallback, useRef } from "react";
+
 // ═══════════════════════════════════════════════════════
 //  STORAGE (in-memory for JSX artifact environment)
 // ═══════════════════════════════════════════════════════
@@ -1178,7 +1179,7 @@ function Rooms({ data, currentUser, onUpdate }) {
   const [expanded, setExpanded] = useState(() => { const s = new Set(); if (isViewer && viewerRoomId) s.add(viewerRoomId); return s; });
   const toggle = (id) => setExpanded(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
-  const emptyForm = () => { const t = todayStr(); return { communityName:"", address:"", ownerName:"", salesRep:"", rentDay:"5", rent:"", leaseStart:t, contractEnd:addOneYear(t), tenantContactName:"", tenantContactPhone:"", cohabitants:[], renewals:[], contractPhoto:"", ownerBankPhoto:"", inspectionPhotos:[], autoRentRemind:false, rentalSubsidy:false, taxDeclaration:false, householdRegistration:false, roomType:"general", electricityType:"fixed", electricityFixedRate:"", waterType:"fixed", waterFixedRate:"" }; };
+  const emptyForm = () => { const t = todayStr(); return { communityName:"", address:"", ownerName:"", salesRep:"", rentDay:"5", rent:"", leaseStart:t, contractEnd:addOneYear(t), tenantContactName:"", tenantContactPhone:"", cohabitants:[], renewals:[], contractPhoto:"", ownerBankPhoto:"", inspectionPhotos:[], autoRentRemind:false, rentalSubsidy:false, taxDeclaration:false, householdRegistration:false, roomType:"general", electricityType:"fixed", electricityFixedRate:"", waterType:"fixed", waterFixedRate:"", assignedAdmins:[] }; };
   const [showAdd, setShowAdd]     = useState(false);
   const [editRoom, setEditRoom]   = useState(null);
   const [form, setForm]           = useState(emptyForm);
@@ -1203,7 +1204,7 @@ function Rooms({ data, currentUser, onUpdate }) {
   };
 
   const openEdit = (room) => {
-    setForm({ communityName:room.communityName||"", address:room.address||"", ownerName:room.ownerName||"", salesRep:room.salesRep||"", rentDay:room.rentDay||"5", rent:room.rent||"", leaseStart:room.leaseStart||"", contractEnd:room.contractEnd||"", tenantContactName:room.tenantContactName||"", tenantContactPhone:room.tenantContactPhone||"", cohabitants:(room.cohabitants||[]).map(c=>({name:c.name||"",phone:c.phone||""})), renewals:(room.renewals||[]).map(r=>({renewStart:r.renewStart||"",renewEnd:r.renewEnd||""})), contractPhoto:room.contractPhoto||"", ownerBankPhoto:room.ownerBankPhoto||"", inspectionPhotos:room.inspectionPhotos||[], autoRentRemind:room.autoRentRemind||false, rentalSubsidy:room.rentalSubsidy||false, taxDeclaration:room.taxDeclaration||false, householdRegistration:room.householdRegistration||false, roomType:room.roomType||"general", electricityType:room.electricityType||"fixed", electricityFixedRate:room.electricityFixedRate||"", waterType:room.waterType||"fixed", waterFixedRate:room.waterFixedRate||"" });
+    setForm({ communityName:room.communityName||"", address:room.address||"", ownerName:room.ownerName||"", salesRep:room.salesRep||"", rentDay:room.rentDay||"5", rent:room.rent||"", leaseStart:room.leaseStart||"", contractEnd:room.contractEnd||"", tenantContactName:room.tenantContactName||"", tenantContactPhone:room.tenantContactPhone||"", cohabitants:(room.cohabitants||[]).map(c=>({name:c.name||"",phone:c.phone||""})), renewals:(room.renewals||[]).map(r=>({renewStart:r.renewStart||"",renewEnd:r.renewEnd||""})), contractPhoto:room.contractPhoto||"", ownerBankPhoto:room.ownerBankPhoto||"", inspectionPhotos:room.inspectionPhotos||[], autoRentRemind:room.autoRentRemind||false, rentalSubsidy:room.rentalSubsidy||false, taxDeclaration:room.taxDeclaration||false, householdRegistration:room.householdRegistration||false, roomType:room.roomType||"general", electricityType:room.electricityType||"fixed", electricityFixedRate:room.electricityFixedRate||"", waterType:room.waterType||"fixed", waterFixedRate:room.waterFixedRate||"", assignedAdmins:room.assignedAdmins||[] });
     setShowRenew((room.renewals || []).length > 0);
     setEditRoom(room); setShowAdd(true);
   };
@@ -1297,6 +1298,14 @@ function Rooms({ data, currentUser, onUpdate }) {
         const oldRenewals = (prev.renewals || []).length;
         const newRenewals = (form.renewals || []).length;
         if (oldRenewals !== newRenewals) diffs.push(`續約記錄：${oldRenewals} 筆 → ${newRenewals} 筆`);
+        const oldAdmins = [...(prev.assignedAdmins||[])].sort().join(",");
+        const newAdmins = [...(form.assignedAdmins||[])].sort().join(",");
+        if (oldAdmins !== newAdmins) {
+          const getName = id => { const u=(d.users||[]).find(x=>x.id===id); return u?u.name:id; };
+          const oldNames = (prev.assignedAdmins||[]).map(getName).join("、")||"（未指定）";
+          const newNames = (form.assignedAdmins||[]).map(getName).join("、")||"（未指定）";
+          diffs.push(`負責管理員：${oldNames} → ${newNames}`);
+        }
 
         logAction = diffs.length > 0
           ? `【修改房源】「${form.communityName}」變更：${diffs.join("；")}`
@@ -1382,7 +1391,12 @@ function Rooms({ data, currentUser, onUpdate }) {
     );
   }
 
-  const visibleRooms = rooms.filter(r=>isViewer?r.id===viewerRoomId:true).sort((a,b)=>(isRentDue(a)?0:1)-(isRentDue(b)?0:1));
+  const visibleRooms = rooms.filter(r=>{
+    if (isViewer) return r.id===viewerRoomId;
+    if (isSA)     return true;
+    if (isAdmin)  return !(r.assignedAdmins||[]).length || (r.assignedAdmins||[]).includes(currentUser.id);
+    return true;
+  }).sort((a,b)=>(isRentDue(a)?0:1)-(isRentDue(b)?0:1));
 
   return (
     <div>
@@ -1403,7 +1417,7 @@ function Rooms({ data, currentUser, onUpdate }) {
                 <div style={{ width:9, height:9, borderRadius:"50%", flexShrink:0, background:due?T.red:(room.status==="rented"?T.green:T.amber) }}/>
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ fontWeight:700, color:T.text, fontSize:15, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{room.communityName}</div>
-                  {!open && <div style={{ fontSize:12, color:T.textSub, marginTop:1, display:"flex", gap:8 }}>{room.rent&&<span>{fmt(room.rent)}/月</span>}{room.tenantContactName&&<span>· {room.tenantContactName}</span>}{due&&<span style={{ color:T.red, fontWeight:700 }}>· ⚠️ 待繳租</span>}{near&&!due&&<span style={{ color:T.amber, fontWeight:700 }}>· 即將到期</span>}</div>}
+                  {!open && <div style={{ fontSize:12, color:T.textSub, marginTop:1, display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>{room.rent&&<span>{fmt(room.rent)}/月</span>}{room.tenantContactName&&<span>· {room.tenantContactName}</span>}{due&&<span style={{ color:T.red, fontWeight:700 }}>· ⚠️ 待繳租</span>}{near&&!due&&<span style={{ color:T.amber, fontWeight:700 }}>· 即將到期</span>}{(room.assignedAdmins||[]).length>0&&<span style={{ display:"inline-flex", gap:3, alignItems:"center" }}>{(room.assignedAdmins||[]).map(uid=>{const u=(data.users||[]).find(x=>x.id===uid);return u?<span key={uid} title={u.name} style={{ width:16,height:16,borderRadius:"50%",background:T.blue,color:"#fff",fontSize:9,fontWeight:700,display:"inline-flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>{u.avatar||u.name[0]}</span>:null;})}</span>}</div>}
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
                   {due&&role.canEdit&&<button onClick={e=>{e.stopPropagation();markPaid(room);}} style={{ background:T.green, color:"#fff", border:"none", borderRadius:7, padding:"5px 11px", fontSize:12, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap", fontFamily:"inherit" }}>已繳租完畢</button>}
@@ -1456,6 +1470,25 @@ function Rooms({ data, currentUser, onUpdate }) {
                             <a href={p.dataUrl} download={`點交照片_${i+1}.jpg`} title="下載" style={{ position:"absolute", bottom:3, right:3, background:"rgba(0,0,0,0.52)", color:"#fff", borderRadius:4, padding:"2px 5px", fontSize:10, textDecoration:"none", lineHeight:1 }}>⬇</a>
                           </div>
                         ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── 負責管理員 ── */}
+                  {(room.assignedAdmins||[]).length>0&&(
+                    <div style={{ marginBottom:10, background:T.accentBg, border:`1px solid ${T.accent}33`, borderRadius:9, padding:"10px 12px" }}>
+                      <div style={{ fontSize:12, fontWeight:700, color:T.accent, marginBottom:8 }}>👤 負責管理員</div>
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                        {(room.assignedAdmins||[]).map(uid=>{
+                          const u=(data.users||[]).find(x=>x.id===uid);
+                          return u ? (
+                            <div key={uid} style={{ display:"flex", alignItems:"center", gap:6, background:T.bg, border:`1px solid ${T.accent}44`, borderRadius:20, padding:"4px 10px 4px 4px" }}>
+                              <div style={{ width:22, height:22, borderRadius:"50%", background:T.blue, color:"#fff", fontSize:11, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>{u.avatar||u.name[0]}</div>
+                              <span style={{ fontSize:13, fontWeight:600, color:T.text }}>{u.name}</span>
+                              <span style={{ fontSize:11, color:T.textMuted }}>({ROLES[u.role]?.label||u.role})</span>
+                            </div>
+                          ) : null;
+                        })}
                       </div>
                     </div>
                   )}
@@ -1668,6 +1701,29 @@ function Rooms({ data, currentUser, onUpdate }) {
               </div>
             )}
           </div>
+
+          {/* ── 負責管理員：多選 ── */}
+          {isSA && (
+            <div style={{ marginBottom:12 }}>
+              <label style={{ ...S.label, marginBottom:8, display:"block" }}>負責管理員 <span style={{ fontWeight:400, color:T.textMuted }}>（可複選，未指定則所有管理員皆可見）</span></label>
+              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                {(data.users||[]).filter(u=>u.role==="admin").map(u=>{
+                  const checked=(form.assignedAdmins||[]).includes(u.id);
+                  return (
+                    <label key={u.id} style={{ display:"flex", alignItems:"center", gap:10, cursor:"pointer", background:checked?T.accentBg:T.bgSub, border:`1.5px solid ${checked?T.accent+"66":T.border}`, borderRadius:9, padding:"8px 12px", transition:"all .15s" }}>
+                      <input type="checkbox" checked={checked} onChange={()=>setForm(f=>({ ...f, assignedAdmins: checked ? (f.assignedAdmins||[]).filter(id=>id!==u.id) : [...(f.assignedAdmins||[]), u.id] }))} style={{ width:16, height:16, accentColor:T.blue, cursor:"pointer", flexShrink:0 }}/>
+                      <div style={{ width:28, height:28, borderRadius:"50%", background:T.blue, color:"#fff", fontSize:13, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>{u.avatar||u.name[0]}</div>
+                      <div>
+                        <div style={{ fontSize:14, fontWeight:600, color:T.text }}>{u.name}</div>
+                        <div style={{ fontSize:12, color:T.textMuted }}>{u.email||u.account||""}</div>
+                      </div>
+                    </label>
+                  );
+                })}
+                {(data.users||[]).filter(u=>u.role==="admin").length===0&&<div style={{ fontSize:13, color:T.textMuted, padding:"8px 0" }}>目前尚無管理員帳號</div>}
+              </div>
+            </div>
+          )}
 
           <button onClick={saveRoom} style={{ ...S.btn(), width:"100%", justifyContent:"center", padding:11, marginTop:4 }}>{editRoom?"儲存修改":"確認新增"}</button>
         </Modal>
@@ -2212,7 +2268,7 @@ function ActivityLog({ data, currentUser, onUpdate }) {
 // ═══════════════════════════════════════════════════════
 //  MAIN APP
 // ═══════════════════════════════════════════════════════
-function RentKeeperApp() {
+export default function RentKeeperApp() {
   const [data, setData] = useState(null);
   const [user, setUser] = useState(null);
   const [tab, setTab]   = useState("dashboard");
@@ -2472,9 +2528,6 @@ function RentKeeperApp() {
   );
 }
 
-
-ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(RentKeeperApp));
-
-  </script>
+</script>
 </body>
 </html>
