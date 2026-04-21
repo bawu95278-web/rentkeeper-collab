@@ -1012,6 +1012,132 @@ function PaymentRecords({ room, currentUser, isViewer, onUpdate, onViewPhoto }) 
 }
 
 // ═══════════════════════════════════════════════════════
+//  DEFECT PANEL
+// ═══════════════════════════════════════════════════════
+function DefectPanel({ room, currentUser, onUpdate, onViewPhoto }) {
+  const [showForm, setShowForm]     = useState(false);
+  const [editItem, setEditItem]     = useState(null);
+  const [form, setForm]             = useState({ description:"", photo:"" });
+  const [confirmDel, setConfirmDel] = useState(null);
+  const [showLog, setShowLog]       = useState(false);
+  const defPhotoRef = useRef(null);
+
+  const openAdd  = () => { setForm({ description:"", photo:"" }); setEditItem(null); setShowForm(true); };
+  const openEdit = (d) => { setForm({ description:d.description||"", photo:d.photo||"" }); setEditItem(d); setShowForm(true); };
+  const cancel   = () => { setShowForm(false); setEditItem(null); };
+
+  const save = () => {
+    if (!form.description && !form.photo) return;
+    const now = nowISO();
+    if (editItem) {
+      const entry = { id:uid(), action:"modify", defectId:editItem.id, userId:currentUser.id, userName:currentUser.name, timestamp:now, detail:`修改：${form.description||"（更新照片）"}` };
+      onUpdate(d => ({ ...d, rooms:d.rooms.map(r => r.id===room.id ? { ...r,
+        defects:(r.defects||[]).map(x => x.id===editItem.id ? {...x,description:form.description,photo:form.photo,updatedBy:currentUser.id,updatedAt:now} : x),
+        defectLog:[...(r.defectLog||[]),entry] } : r) }));
+    } else {
+      const newId = uid();
+      const entry = { id:uid(), action:"add", defectId:newId, userId:currentUser.id, userName:currentUser.name, timestamp:now, detail:`新增：${form.description||"（上傳照片）"}` };
+      onUpdate(d => ({ ...d, rooms:d.rooms.map(r => r.id===room.id ? { ...r,
+        defects:[...(r.defects||[]), { id:newId, description:form.description, photo:form.photo, createdBy:currentUser.id, createdAt:now, updatedBy:null, updatedAt:null }],
+        defectLog:[...(r.defectLog||[]),entry] } : r) }));
+    }
+    cancel();
+  };
+
+  const doDelete = (d) => {
+    const entry = { id:uid(), action:"delete", defectId:d.id, userId:currentUser.id, userName:currentUser.name, timestamp:nowISO(), detail:`刪除：${d.description||"（已刪除照片）"}` };
+    onUpdate(data => ({ ...data, rooms:data.rooms.map(r => r.id===room.id ? { ...r,
+      defects:(r.defects||[]).filter(x => x.id!==d.id),
+      defectLog:[...(r.defectLog||[]),entry] } : r) }));
+    setConfirmDel(null);
+  };
+
+  const logColor = { add:T.green, modify:T.amber, delete:T.red };
+  const logLabel = { add:"新增", modify:"修改", delete:"刪除" };
+  const defects   = room.defects  || [];
+  const defectLog = room.defectLog|| [];
+
+  return (
+    <div style={{ marginBottom:12 }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
+        <div style={{ fontSize:12, fontWeight:700, color:T.textSub, display:"flex", alignItems:"center", gap:6 }}>
+          🔍 屋況瑕疵
+          {defects.length>0&&<span style={{ background:T.amberBg, color:T.amber, fontSize:10, fontWeight:700, borderRadius:99, padding:"1px 7px" }}>{defects.length}</span>}
+        </div>
+        <button onClick={openAdd} style={{ ...S.btn(T.textSub,true), padding:"4px 10px", fontSize:12 }}><Icon n="plus" s={12}/> 新增</button>
+      </div>
+
+      {defects.length===0&&!showForm&&<div style={{ textAlign:"center", color:T.textMuted, fontSize:12, padding:"8px 0 4px" }}>尚無瑕疵記錄</div>}
+
+      {defects.map(d=>(
+        <div key={d.id} style={{ background:T.bgSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"10px 12px", marginBottom:6 }}>
+          {confirmDel===d.id?(
+            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+              <span style={{ flex:1, fontSize:12, color:T.text }}>確認刪除此瑕疵？</span>
+              <button onClick={()=>doDelete(d)} style={{ background:T.red, color:"#fff", border:"none", borderRadius:6, padding:"4px 10px", fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>確認</button>
+              <button onClick={()=>setConfirmDel(null)} style={{ background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:6, padding:"4px 10px", fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>取消</button>
+            </div>
+          ):(
+            <div style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
+              {d.photo&&<img src={d.photo} style={{ width:54, height:54, borderRadius:6, objectFit:"cover", cursor:"pointer", flexShrink:0, border:`1px solid ${T.border}` }} onClick={()=>onViewPhoto(d.photo)}/>}
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:13, color:T.text, lineHeight:1.6, wordBreak:"break-all" }}>{d.description||"（無文字描述）"}</div>
+                <div style={{ fontSize:11, color:T.textMuted, marginTop:3 }}>
+                  {d.updatedAt?`修改：${toROC(d.updatedAt,true)}`:`新增：${toROC(d.createdAt,true)}`}
+                  　by {(d.updatedAt?d.updatedBy:d.createdBy)===currentUser.id?"我":currentUser.name}
+                </div>
+              </div>
+              <div style={{ display:"flex", gap:4, flexShrink:0 }}>
+                <button onClick={()=>openEdit(d)} style={{ background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:6, padding:"4px 8px", fontSize:12, cursor:"pointer", fontFamily:"inherit" }}><Icon n="edit" s={12}/></button>
+                <button onClick={()=>setConfirmDel(d.id)} style={{ background:T.redBg, color:T.red, border:`1px solid ${T.red}33`, borderRadius:6, padding:"4px 8px", fontSize:12, cursor:"pointer", fontFamily:"inherit" }}><Icon n="trash" s={12}/></button>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {showForm&&(
+        <div style={{ background:T.accentBg, border:`1px solid ${T.accent}33`, borderRadius:8, padding:"12px", marginBottom:8 }}>
+          <div style={{ fontSize:12, fontWeight:700, color:T.accent, marginBottom:8 }}>{editItem?"✏️ 編輯瑕疵":"➕ 新增瑕疵"}</div>
+          <input ref={defPhotoRef} type="file" accept="image/*" onChange={e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>setForm(fm=>({...fm,photo:ev.target.result})); r.readAsDataURL(f); }} style={{ display:"none" }}/>
+          <button onClick={()=>defPhotoRef.current?.click()} style={{ ...S.btn(T.textSub,true), width:"100%", justifyContent:"center", marginBottom:8, fontSize:12 }}>
+            {form.photo?"✅ 已上傳照片（點擊更換）":"📷 上傳照片（選填）"}
+          </button>
+          <textarea value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} placeholder="描述瑕疵狀況，例如：客廳牆壁有裂縫..." style={{ ...S.input, height:68, resize:"vertical", fontSize:13, marginBottom:8 }}/>
+          <div style={{ display:"flex", gap:8 }}>
+            <button onClick={save} style={{ flex:1, ...S.btn(), justifyContent:"center", fontSize:13 }}>儲存</button>
+            <button onClick={cancel} style={{ ...S.btn(T.textSub,true), fontSize:13 }}>取消</button>
+          </div>
+        </div>
+      )}
+
+      {defectLog.length>0&&(
+        <div style={{ marginTop:6 }}>
+          <button onClick={()=>setShowLog(v=>!v)} style={{ background:"none", border:"none", cursor:"pointer", color:T.textMuted, fontSize:11, fontFamily:"inherit", display:"flex", alignItems:"center", gap:4, padding:"4px 0", userSelect:"none" }}>
+            <span style={{ transform:showLog?"rotate(90deg)":"rotate(0deg)", display:"inline-block", transition:"transform .15s" }}>▶</span>
+            瑕疵變更記錄（{defectLog.length} 筆）
+          </button>
+          {showLog&&(
+            <div style={{ background:T.bgMuted, borderRadius:8, padding:"10px 12px", marginTop:4 }}>
+              {[...defectLog].reverse().map(log=>(
+                <div key={log.id} style={{ display:"flex", alignItems:"flex-start", gap:8, marginBottom:5 }}>
+                  <span style={{ padding:"2px 7px", borderRadius:99, fontSize:10, fontWeight:700, background:(logColor[log.action]||T.textMuted)+"22", color:logColor[log.action]||T.textMuted, flexShrink:0 }}>{logLabel[log.action]||log.action}</span>
+                  <div style={{ flex:1 }}>
+                    <span style={{ fontSize:12, color:T.text }}>{log.detail}</span>
+                    <span style={{ fontSize:11, color:T.textMuted, marginLeft:6 }}>by {log.userName||"未知"}</span>
+                  </div>
+                  <span style={{ fontSize:11, color:T.textMuted, flexShrink:0, whiteSpace:"nowrap" }}>{toROC(log.timestamp,true)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
 //  ROOMS
 // ═══════════════════════════════════════════════════════
 function Rooms({ data, currentUser, onUpdate }) {
@@ -1052,7 +1178,7 @@ function Rooms({ data, currentUser, onUpdate }) {
   const [expanded, setExpanded] = useState(() => { const s = new Set(); if (isViewer && viewerRoomId) s.add(viewerRoomId); return s; });
   const toggle = (id) => setExpanded(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
-  const emptyForm = () => { const t = todayStr(); return { communityName:"", address:"", ownerName:"", salesRep:"", rentDay:"5", rent:"", leaseStart:t, contractEnd:addOneYear(t), tenantContactName:"", tenantContactPhone:"", cohabitants:[], renewals:[], contractPhoto:"", ownerBankPhoto:"", autoRentRemind:false, rentalSubsidy:false, taxDeclaration:false, householdRegistration:false, roomType:"general", electricityType:"fixed", electricityFixedRate:"", waterType:"fixed", waterFixedRate:"" }; };
+  const emptyForm = () => { const t = todayStr(); return { communityName:"", address:"", ownerName:"", salesRep:"", rentDay:"5", rent:"", leaseStart:t, contractEnd:addOneYear(t), tenantContactName:"", tenantContactPhone:"", cohabitants:[], renewals:[], contractPhoto:"", ownerBankPhoto:"", inspectionPhotos:[], autoRentRemind:false, rentalSubsidy:false, taxDeclaration:false, householdRegistration:false, roomType:"general", electricityType:"fixed", electricityFixedRate:"", waterType:"fixed", waterFixedRate:"" }; };
   const [showAdd, setShowAdd]     = useState(false);
   const [editRoom, setEditRoom]   = useState(null);
   const [form, setForm]           = useState(emptyForm);
@@ -1063,12 +1189,21 @@ function Rooms({ data, currentUser, onUpdate }) {
   const [chatInput, setChatInput]     = useState({});
   const [editTpl, setEditTpl]         = useState(false);
   const [tplDraft, setTplDraft]       = useState(null);
-  const fileRef = useRef(null);
-  const bankRef = useRef(null);
+  const fileRef        = useRef(null);
+  const bankRef        = useRef(null);
+  const inspectionRef  = useRef(null);
   const sf = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
+  const handleInspectionUpload = (e) => {
+    Array.from(e.target.files).forEach(file => {
+      const reader = new FileReader();
+      reader.onload = ev => setForm(f => ({ ...f, inspectionPhotos:[...(f.inspectionPhotos||[]), { id:uid(), dataUrl:ev.target.result, uploadedAt:nowISO() }] }));
+      reader.readAsDataURL(file);
+    });
+    e.target.value = "";
+  };
 
   const openEdit = (room) => {
-    setForm({ communityName:room.communityName||"", address:room.address||"", ownerName:room.ownerName||"", salesRep:room.salesRep||"", rentDay:room.rentDay||"5", rent:room.rent||"", leaseStart:room.leaseStart||"", contractEnd:room.contractEnd||"", tenantContactName:room.tenantContactName||"", tenantContactPhone:room.tenantContactPhone||"", cohabitants:(room.cohabitants||[]).map(c=>({name:c.name||"",phone:c.phone||""})), renewals:(room.renewals||[]).map(r=>({renewStart:r.renewStart||"",renewEnd:r.renewEnd||""})), contractPhoto:room.contractPhoto||"", ownerBankPhoto:room.ownerBankPhoto||"", autoRentRemind:room.autoRentRemind||false, rentalSubsidy:room.rentalSubsidy||false, taxDeclaration:room.taxDeclaration||false, householdRegistration:room.householdRegistration||false, roomType:room.roomType||"general", electricityType:room.electricityType||"fixed", electricityFixedRate:room.electricityFixedRate||"", waterType:room.waterType||"fixed", waterFixedRate:room.waterFixedRate||"" });
+    setForm({ communityName:room.communityName||"", address:room.address||"", ownerName:room.ownerName||"", salesRep:room.salesRep||"", rentDay:room.rentDay||"5", rent:room.rent||"", leaseStart:room.leaseStart||"", contractEnd:room.contractEnd||"", tenantContactName:room.tenantContactName||"", tenantContactPhone:room.tenantContactPhone||"", cohabitants:(room.cohabitants||[]).map(c=>({name:c.name||"",phone:c.phone||""})), renewals:(room.renewals||[]).map(r=>({renewStart:r.renewStart||"",renewEnd:r.renewEnd||""})), contractPhoto:room.contractPhoto||"", ownerBankPhoto:room.ownerBankPhoto||"", inspectionPhotos:room.inspectionPhotos||[], autoRentRemind:room.autoRentRemind||false, rentalSubsidy:room.rentalSubsidy||false, taxDeclaration:room.taxDeclaration||false, householdRegistration:room.householdRegistration||false, roomType:room.roomType||"general", electricityType:room.electricityType||"fixed", electricityFixedRate:room.electricityFixedRate||"", waterType:room.waterType||"fixed", waterFixedRate:room.waterFixedRate||"" });
     setShowRenew((room.renewals || []).length > 0);
     setEditRoom(room); setShowAdd(true);
   };
@@ -1310,6 +1445,24 @@ function Rooms({ data, currentUser, onUpdate }) {
                     </div>}
                   </div>}
 
+                  {/* ── 出租點交室內照片（所有人可讀取下載） ── */}
+                  {(room.inspectionPhotos||[]).length>0&&(
+                    <div style={{ marginBottom:10 }}>
+                      <div style={{ fontSize:12, fontWeight:700, color:T.textSub, marginBottom:8 }}>📷 點交室內照片</div>
+                      <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                        {(room.inspectionPhotos||[]).map((p,i)=>(
+                          <div key={p.id||i} style={{ position:"relative" }}>
+                            <img src={p.dataUrl} style={{ width:64, height:64, borderRadius:7, objectFit:"cover", cursor:"pointer", border:`1px solid ${T.border}` }} onClick={()=>setViewPhoto(p.dataUrl)}/>
+                            <a href={p.dataUrl} download={`點交照片_${i+1}.jpg`} title="下載" style={{ position:"absolute", bottom:3, right:3, background:"rgba(0,0,0,0.52)", color:"#fff", borderRadius:4, padding:"2px 5px", fontSize:10, textDecoration:"none", lineHeight:1 }}>⬇</a>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── 屋況瑕疵（所有人皆可新增/修改/刪除，自動記錄） ── */}
+                  <DefectPanel room={room} currentUser={currentUser} onUpdate={onUpdate} onViewPhoto={setViewPhoto}/>
+
                   {/* ── 匯款截圖記錄區塊（所有身份可見，租客可上傳） ── */}
                   <PaymentRecords
                     room={room}
@@ -1494,6 +1647,26 @@ function Rooms({ data, currentUser, onUpdate }) {
             <button onClick={()=>bankRef.current?.click()} style={{ ...S.btn(T.textSub,true), width:"100%", justifyContent:"center" }}>
               {form.ownerBankPhoto ? "✅ 已上傳（點擊更換）" : "選擇照片"}
             </button>
+          </div>
+
+          {/* 出租點交室內照片：所有人可讀取下載，管理員以上可上傳修改 */}
+          <div style={{ marginBottom:10 }}>
+            <label style={S.label}>出租點交室內照片 <span style={{ fontWeight:400, color:T.textMuted }}>（所有人可讀取下載，可多張）</span></label>
+            <input ref={inspectionRef} type="file" accept="image/*" multiple onChange={handleInspectionUpload} style={{ display:"none" }}/>
+            <button onClick={()=>inspectionRef.current?.click()} style={{ ...S.btn(T.textSub,true), width:"100%", justifyContent:"center", marginBottom:8 }}>
+              📷 上傳照片（可多張）
+            </button>
+            {(form.inspectionPhotos||[]).length>0&&(
+              <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                {(form.inspectionPhotos||[]).map((p,i)=>(
+                  <div key={p.id||i} style={{ position:"relative" }}>
+                    <img src={p.dataUrl} style={{ width:72, height:72, borderRadius:7, objectFit:"cover", border:`1px solid ${T.border}`, cursor:"pointer" }} onClick={()=>setViewPhoto(p.dataUrl)}/>
+                    <button onClick={()=>setForm(f=>({...f,inspectionPhotos:f.inspectionPhotos.filter((_,j)=>j!==i)}))}
+                      style={{ position:"absolute", top:-5, right:-5, width:18, height:18, borderRadius:"50%", background:T.red, color:"#fff", border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontFamily:"inherit", padding:0 }}>✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <button onClick={saveRoom} style={{ ...S.btn(), width:"100%", justifyContent:"center", padding:11, marginTop:4 }}>{editRoom?"儲存修改":"確認新增"}</button>
