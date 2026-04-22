@@ -53,7 +53,8 @@ const DEFAULT_DATA = {
     { id: "u4", name: "憲哥",   email: "okdnhaco@gmail.com",  password: "c6b3e728ce8a6c10e7e9f8eefbd42f0c9ee7d7c2097d0979aeeefdf38a9556af", role: "superadmin", avatar: "憲", online: false },
     { id: "u5", name: "婉婷",   email: "0986311933",           password: "fd9762b82a6c016dd662cf07fbd6d7deecb56caf9908e375c3dcbb043ebbebba", role: "admin",      avatar: "婉", online: false },
     { id: "u6", name: "管理員", email: "okdnhaco@gmail.com",  password: "fd9762b82a6c016dd662cf07fbd6d7deecb56caf9908e375c3dcbb043ebbebba", role: "admin", avatar: "管", online: false },
-    { id: "u7", name: "林意婷", email: "0921987265",           password: "55c12b2e9148678008527e3cbb79e8b7c9f3227d552c5fd53de581e8f566bd0d", role: "admin", avatar: "林", online: false },
+    { id: "u7", name: "林意婷", email: "0921987265",           password: "55c12b2e9148678008527e3cbb79e8b7c9f3227d552c5fd53de581e8f566bd0d", role: "admin",   avatar: "林", online: false },
+    { id: "u8", name: "財管人員", email: "0986311933",         password: "fd9762b82a6c016dd662cf07fbd6d7deecb56caf9908e375c3dcbb043ebbebba", role: "finance", avatar: "財", online: false },
   ],
   rooms: [
     { id: "r1", communityName: "101室", rent: 12000, status: "rented", tenantId: "t1", rentDay: "5", leaseStart: "2024-03-01", contractEnd: "2025-03-01", tenantContactName: "張小華", tenantContactPhone: "0912-345-678", cohabitants: [], renewals: [] },
@@ -3468,6 +3469,7 @@ function RentKeeperApp() {
     </div>
   );
 }
+
 
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(RentKeeperApp));
 
