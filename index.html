@@ -1551,6 +1551,42 @@ function Rooms({ data, currentUser, onUpdate }) {
   const [contractRoom, setContractRoom] = useState(null);
   const [lineRemind, setLineRemind]     = useState({});
   const lineRemindTimer                 = useRef({});
+  const [showMeterForm, setShowMeterForm] = useState(null); // room.id
+  const [meterDraft, setMeterDraft]       = useState({ date:"", reading:"", rate:"" });
+
+  const generateElecReport = useCallback((room) => {
+    const readings = (room.meterReadings||[]).slice().sort((a,b)=>a.date.localeCompare(b.date));
+    const rent = Number(room.rent||0);
+    const label = `${room.communityName}${room.address?" "+room.address:""}`;
+    const lines = [`【${label} 電費月報表】`, ""];
+    lines.push("抄表日期\t抄表度數\t電費單價\t本期電費\t租金\t合計匯款");
+    lines.push("─".repeat(52));
+    readings.forEach((r,i) => {
+      const prev = i>0 ? readings[i-1] : null;
+      const diff = prev ? r.reading - prev.reading : 0;
+      const elecFee = prev ? Math.round(diff * r.ratePerKwh) : null;
+      const total = elecFee!==null ? elecFee+rent : null;
+      const isLast = i===readings.length-1;
+      const elecStr = elecFee!==null ? elecFee.toLocaleString() : "—";
+      const totalStr = total!==null ? total.toLocaleString() : (i===0?"（起始）":"—");
+      const rateStr = elecFee!==null ? r.ratePerKwh.toFixed(2) : "—";
+      lines.push(`${toROC(r.date)}\t${r.reading.toLocaleString()}\t${rateStr}\t${elecStr}\t${rent.toLocaleString()}\t${totalStr}${isLast?" ◀ 本期":""}`);
+    });
+    lines.push("");
+    if (readings.length>1) {
+      const last=readings[readings.length-1], prev=readings[readings.length-2];
+      const fee=Math.round((last.reading-prev.reading)*last.ratePerKwh);
+      const total=fee+rent;
+      lines.push(`▶ 本期應匯款：NT$ ${total.toLocaleString()}`);
+      lines.push(`   電費 NT$${fee.toLocaleString()} ＋ 租金 NT$${rent.toLocaleString()}`);
+    } else if (readings.length===1) {
+      lines.push(`▶ 本月租金：NT$ ${rent.toLocaleString()}`);
+    }
+    lines.push(`▶ 請於每月 ${room.rentDay||5} 號前完成匯款`);
+    lines.push(""); lines.push("感謝您的配合！");
+    lines.push("— 家樂美房產管理顧問有限公司");
+    return lines.join("\n");
+  }, []);
 
   const sendLineReminder = (room) => {
     const unpaidBills = (bills||[]).filter(b=>b.roomId===room.id&&b.status==="unpaid").sort((a,b)=>a.month.localeCompare(b.month));
@@ -1954,6 +1990,129 @@ function Rooms({ data, currentUser, onUpdate }) {
                       </div>
                     </div>
                   )}
+
+                  {/* ── 電費記錄（分租套房） ── */}
+                  {room.roomType==="shared"&&(()=>{
+                    const readings=(room.meterReadings||[]).slice().sort((a,b)=>a.date.localeCompare(b.date));
+                    const rent=Number(room.rent||0);
+                    const isMeterOpen=showMeterForm===room.id;
+                    const prevReading=readings.length>0?readings[readings.length-1]:null;
+                    const draftCur=Number(meterDraft.reading);
+                    const draftRate=Number(meterDraft.rate);
+                    const previewOk=prevReading&&draftCur>prevReading.reading&&draftRate>0;
+                    const previewDiff=previewOk?draftCur-prevReading.reading:0;
+                    const previewFee=previewOk?Math.round(previewDiff*draftRate):0;
+                    const previewTotal=previewOk?previewFee+rent:0;
+                    return (
+                      <div style={{ marginBottom:12 }}>
+                        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
+                          <span style={{ fontSize:12, fontWeight:700, color:T.textSub }}>⚡ 電費記錄</span>
+                          {(isSA||isAdmin)&&(
+                            <button onClick={()=>{ setShowMeterForm(isMeterOpen?null:room.id); setMeterDraft({ date:todayStr(), reading:"", rate:"" }); }}
+                              style={{ ...S.btn(T.amber,true), fontSize:11, padding:"3px 10px" }}>
+                              {isMeterOpen?"取消":"＋ 新增電表記錄"}
+                            </button>
+                          )}
+                        </div>
+
+                        {/* 新增電表表單 */}
+                        {isMeterOpen&&(
+                          <div style={{ background:"#fffbeb", border:"1.5px solid #fcd34d", borderRadius:9, padding:"12px 13px", marginBottom:10 }}>
+                            <div style={{ fontSize:12, fontWeight:700, color:"#92400e", marginBottom:10 }}>⚡ 新增電表記錄</div>
+                            <label style={S.label}>抄表日期</label>
+                            <ROCDateInput value={meterDraft.date} onChange={e=>setMeterDraft(f=>({...f,date:e.target.value}))}/>
+                            <div style={{ display:"flex", gap:8 }}>
+                              <div style={{ flex:1 }}>
+                                <label style={S.label}>本期電表度數（累計）</label>
+                                <input type="number" style={S.input} value={meterDraft.reading} onChange={e=>setMeterDraft(f=>({...f,reading:e.target.value}))} placeholder="例：1905"/>
+                              </div>
+                              <div style={{ flex:1 }}>
+                                <label style={S.label}>電費單價（元/度）</label>
+                                <input type="number" step="0.01" style={{ ...S.input, marginBottom:0 }} value={meterDraft.rate} onChange={e=>setMeterDraft(f=>({...f,rate:e.target.value}))} placeholder="例：3.34"/>
+                              </div>
+                            </div>
+                            {/* 預覽計算 */}
+                            {previewOk&&(
+                              <div style={{ background:"#fff", border:"1px solid #fcd34d", borderRadius:7, padding:"8px 12px", margin:"8px 0", fontSize:12 }}>
+                                <div style={{ fontWeight:700, color:"#92400e", marginBottom:4 }}>📊 本期預覽</div>
+                                <div style={{ color:T.textSub }}>用電：{draftCur} − {prevReading.reading} = <strong>{previewDiff} 度</strong></div>
+                                <div style={{ color:T.textSub }}>電費：{previewDiff} × {draftRate} = <strong>NT$ {previewFee.toLocaleString()}</strong></div>
+                                <div style={{ color:"#d97706", fontWeight:800, marginTop:4, fontSize:13 }}>合計匯款：NT$ {previewTotal.toLocaleString()}</div>
+                              </div>
+                            )}
+                            {prevReading===null&&(
+                              <div style={{ fontSize:11, color:"#d97706", marginTop:4, marginBottom:8 }}>📌 首筆記錄為起始度數，不計算電費。</div>
+                            )}
+                            <button onClick={()=>{
+                              if (!meterDraft.reading) return;
+                              const r={ id:uid(), date:meterDraft.date||todayStr(), reading:Number(meterDraft.reading), ratePerKwh:Number(meterDraft.rate)||0, createdAt:nowISO() };
+                              onUpdate(d=>({ ...d, rooms:d.rooms.map(x=>x.id===room.id?{...x,meterReadings:[...(x.meterReadings||[]),r].sort((a,b)=>a.date.localeCompare(b.date))}:x) }));
+                              setShowMeterForm(null);
+                            }} style={{ ...S.btn(T.amber), width:"100%", justifyContent:"center" }}>
+                              💾 儲存電表記錄
+                            </button>
+                          </div>
+                        )}
+
+                        {/* 記錄表格 */}
+                        {readings.length>0?(
+                          <div style={{ overflowX:"auto", marginBottom:8, borderRadius:8, border:`1px solid ${T.border}` }}>
+                            <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                              <thead>
+                                <tr style={{ background:T.bgMuted }}>
+                                  {["抄表日期","抄表度數","電費單價","本期電費","租金","合計匯款"].map(h=>(
+                                    <th key={h} style={{ padding:"6px 8px", borderBottom:`1px solid ${T.border}`, fontWeight:700, color:T.textSub, textAlign:"center", whiteSpace:"nowrap" }}>{h}</th>
+                                  ))}
+                                  {(isSA||isAdmin)&&<th style={{ padding:"6px 8px", borderBottom:`1px solid ${T.border}` }}></th>}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {readings.map((r,i)=>{
+                                  const prev=i>0?readings[i-1]:null;
+                                  const diff=prev?r.reading-prev.reading:0;
+                                  const elecFee=prev?Math.round(diff*r.ratePerKwh):null;
+                                  const total=elecFee!==null?elecFee+rent:null;
+                                  const isLast=i===readings.length-1;
+                                  const c=isLast?"#c2410c":T.text;
+                                  const bg=isLast?"#fffbeb":i%2===0?T.bg:T.bgSub;
+                                  return (
+                                    <tr key={r.id} style={{ background:bg, fontWeight:isLast?700:400 }}>
+                                      <td style={{ padding:"5px 8px", borderBottom:`1px solid ${T.border}`, textAlign:"center", color:c }}>{toROC(r.date)}</td>
+                                      <td style={{ padding:"5px 8px", borderBottom:`1px solid ${T.border}`, textAlign:"right", color:c }}>{r.reading.toLocaleString()}</td>
+                                      <td style={{ padding:"5px 8px", borderBottom:`1px solid ${T.border}`, textAlign:"right", color:c }}>{elecFee!==null?r.ratePerKwh.toFixed(2):"—"}</td>
+                                      <td style={{ padding:"5px 8px", borderBottom:`1px solid ${T.border}`, textAlign:"right", color:c }}>{elecFee!==null?elecFee.toLocaleString():"—"}</td>
+                                      <td style={{ padding:"5px 8px", borderBottom:`1px solid ${T.border}`, textAlign:"right", color:c }}>{rent.toLocaleString()}</td>
+                                      <td style={{ padding:"5px 8px", borderBottom:`1px solid ${T.border}`, textAlign:"right", color:c, fontWeight:isLast?800:600 }}>{total!==null?total.toLocaleString():i===0?"（起始）":"—"}</td>
+                                      {(isSA||isAdmin)&&<td style={{ padding:"5px 8px", borderBottom:`1px solid ${T.border}`, textAlign:"center" }}>
+                                        {isLast&&<button onClick={()=>onUpdate(d=>({...d,rooms:d.rooms.map(x=>x.id===room.id?{...x,meterReadings:x.meterReadings.slice(0,-1)}:x)}))}
+                                          style={{ background:T.redBg, color:T.red, border:"none", borderRadius:4, padding:"2px 7px", fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>刪除</button>}
+                                      </td>}
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        ):(
+                          <div style={{ fontSize:12, color:T.textMuted, textAlign:"center", padding:"10px 0 8px", border:`1px dashed ${T.border}`, borderRadius:8, marginBottom:8 }}>尚無電表記錄，請點「新增電表記錄」輸入起始度數</div>
+                        )}
+
+                        {/* 複製 / 分享按鈕 */}
+                        {readings.length>0&&(
+                          <div style={{ display:"flex", gap:8 }}>
+                            <button onClick={()=>{
+                              const text=generateElecReport(room);
+                              navigator.clipboard.writeText(text).then(()=>showToast("已複製電費報表！","success")).catch(()=>showToast("複製失敗","error"));
+                            }} style={{ ...S.btn(T.textSub,true), flex:1, justifyContent:"center", fontSize:12 }}>📋 複製報表</button>
+                            <button onClick={()=>{
+                              const text=generateElecReport(room);
+                              window.open("https://line.me/R/share?text="+encodeURIComponent(text),"_blank");
+                            }} style={{ ...S.btn("#22c55e"), flex:1, justifyContent:"center", fontSize:12 }}>💚 分享到LINE</button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* ── 負責管理員 ── */}
                   {(room.assignedAdmins||[]).length>0&&(
