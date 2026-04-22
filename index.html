@@ -612,8 +612,8 @@ function LoginScreen({ users, tenants, onLogin }) {
             </>
           )}
 
-          {/* 管理員 / 後台維修：Email + 密碼 */}
-          {(sel === "admin" || sel === "superadmin") && (
+          {/* 管理員 / 後台維修 / 財務行政：Email + 密碼 */}
+          {(sel === "admin" || sel === "superadmin" || sel === "finance") && (
             <>
               <label style={S.label}>帳號 Email</label>
               <input style={S.input} type="email" value={email}
