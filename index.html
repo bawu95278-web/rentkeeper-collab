@@ -718,6 +718,24 @@ function Dashboard({ data, currentUser, onUpdate }) {
   }).filter(r=>r._end&&r._days!==null&&r._days<=45&&r._days>0);
   const onlineUsers = users.filter(u=>u.online&&u.id!==currentUser.id);
   const isFinanceDash = currentUser.role === "finance";
+
+  // ── 催收警示：超過 3 天未繳租 ────────────────────────
+  const getOverdueDays = (room) => {
+    if (room.status !== "rented") return 0;
+    const rentDay = parseInt(room.rentDay || "5");
+    // 找最早一筆未繳帳單
+    const unpaid = (bills||[]).filter(b => b.roomId===room.id && b.status==="unpaid")
+                              .sort((a,b) => a.month.localeCompare(b.month));
+    if (!unpaid.length) return 0;
+    const [yr, mo] = unpaid[0].month.split("-").map(Number);
+    const dueDate  = new Date(yr, mo-1, rentDay);
+    return Math.max(0, Math.floor((Date.now() - dueDate.getTime()) / 86400000));
+  };
+  const overdueRooms = rooms
+    .filter(r => r.status==="rented")
+    .map(r => ({ ...r, _overdueDays: getOverdueDays(r), _unpaidAmt: (bills||[]).filter(b=>b.roomId===r.id&&b.status==="unpaid").reduce((s,b)=>s+(b.amount||0),0) }))
+    .filter(r => r._overdueDays >= 3)
+    .sort((a,b) => b._overdueDays - a._overdueDays);
   // 押金退還待處理（finance 專屬提醒）
   const depositPending = rooms.filter(r => r.depositRefundStatus === "pending");
   // 押金已退還、等待兩日解散的房源
@@ -774,6 +792,56 @@ function Dashboard({ data, currentUser, onUpdate }) {
               <button onClick={()=>doRenew(r)} style={{ flexShrink:0, background:T.red, color:"#fff", border:"none", borderRadius:8, padding:"7px 13px", fontSize:13, fontWeight:700, cursor:"pointer" }}>✅ 續約完畢</button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* ── 催收警示：超過 3 天未繳租 ── */}
+      {role.canViewFinance && overdueRooms.length>0 && (
+        <div style={{ background:"#fff7ed", border:"2.5px solid #ea580c", borderRadius:12, padding:"14px 16px", marginBottom:16 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+            <span style={{ fontSize:22, animation:"pulse 1s infinite" }}>🚨</span>
+            <span style={{ fontSize:15, fontWeight:800, color:"#c2410c" }}>催收警示 — 逾期未繳租</span>
+            <span style={{ marginLeft:"auto", background:"#ea580c", color:"#fff", borderRadius:99, fontSize:12, fontWeight:700, padding:"2px 9px", animation:"pulse 1.5s infinite" }}>{overdueRooms.length} 間</span>
+          </div>
+          {overdueRooms.map(r=>{
+            const t = (tenants||[]).find(x => (x.linkedRoom===r.id||x.roomId===r.id) && !x.isCohabitant);
+            const daysOver = r._overdueDays;
+            const urgency  = daysOver >= 14 ? "#991b1b" : daysOver >= 7 ? "#c2410c" : "#ea580c";
+            return (
+              <div key={r.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 0", borderTop:"1px solid #ea580c44" }}>
+                {/* 房號閃爍標籤 */}
+                <div style={{ flexShrink:0, minWidth:72, textAlign:"center", borderRadius:8, padding:"5px 10px", color:"#fff", fontWeight:800, fontSize:13, animation:"warn-blink 1.4s ease-in-out infinite", background:urgency }}>
+                  {r.communityName}
+                </div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:"#92400e" }}>
+                    {t?.name || r.tenantContactName || "未知租客"}
+                    {t?.phone && <span style={{ fontWeight:400, color:"#b45309", marginLeft:6, fontSize:12 }}>{t.phone}</span>}
+                  </div>
+                  <div style={{ display:"flex", gap:10, marginTop:3, flexWrap:"wrap" }}>
+                    <span style={{ fontSize:12, color:urgency, fontWeight:700 }}>⏰ 已逾 {daysOver} 天</span>
+                    {r._unpaidAmt>0 && <span style={{ fontSize:12, color:"#92400e" }}>未繳：{fmt(r._unpaidAmt)}</span>}
+                    {r.rentDay && <span style={{ fontSize:12, color:"#b45309" }}>每月 {r.rentDay} 號應繳</span>}
+                  </div>
+                </div>
+                {role.canEdit && (
+                  <button onClick={()=>{
+                    const month=new Date().toISOString().slice(0,7);
+                    const ten=(tenants||[]).find(x=>(x.linkedRoom===r.id||x.roomId===r.id)&&!x.isCohabitant);
+                    onUpdate(d=>{
+                      const ex=d.bills.find(b=>b.roomId===r.id&&b.month===month);
+                      const nb=ex
+                        ?d.bills.map(b=>b.id===ex.id?{...b,status:"paid",paidDate:todayStr(),recordedBy:currentUser.id}:b)
+                        :[...d.bills,{id:uid(),tenantId:ten?.id||r.tenantId||"",roomId:r.id,type:"rent",amount:r.rent,month,status:"paid",paidDate:todayStr(),recordedBy:currentUser.id}];
+                      return{...d,bills:nb,activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`標記「${r.communityName}」${month} 月租金已繳（催收處理）`,timestamp:nowISO()}]};
+                    });
+                  }} style={{ flexShrink:0, background:"#ea580c", color:"#fff", border:"none", borderRadius:8, padding:"7px 12px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
+                    ✓ 已收款
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -1489,16 +1557,25 @@ function Rooms({ data, currentUser, onUpdate }) {
           const near = dl!==null&&dl<=60&&dl>0;
           const due  = isRentDue(room);
           const open = expanded.has(room.id);
+          const overdueDays = (() => {
+            if (room.status!=="rented") return 0;
+            const rd = parseInt(room.rentDay||"5");
+            const unpaid = (bills||[]).filter(b=>b.roomId===room.id&&b.status==="unpaid").sort((a,b)=>a.month.localeCompare(b.month));
+            if (!unpaid.length) return 0;
+            const [yr,mo]=unpaid[0].month.split("-").map(Number);
+            return Math.max(0,Math.floor((Date.now()-new Date(yr,mo-1,rd).getTime())/86400000));
+          })();
+          const isOverdue = overdueDays >= 3;
           const isEvicting = room.depositRefundStatus==="refunded" && !room.depositEvictionDone;
-          const bc   = isEvicting?"#7c3aed":(due?T.red:(near?T.amber+"99":T.border));
-          const cardBg = isEvicting?"#faf5ff":(due?T.redBg:(near?T.amberBg:T.bg));
+          const bc   = isEvicting?"#7c3aed":(isOverdue?"#ea580c":(due?T.red:(near?T.amber+"99":T.border)));
+          const cardBg = isEvicting?"#faf5ff":(isOverdue?"#fff7ed":(due?T.redBg:(near?T.amberBg:T.bg)));
           return (
-            <div key={room.id} style={{ borderRadius:12, border:`${isEvicting||due?2:1}px solid ${bc}`, overflow:"hidden", background:cardBg }}>
+            <div key={room.id} style={{ borderRadius:12, border:`${isEvicting||due||isOverdue?2:1}px solid ${bc}`, overflow:"hidden", background:cardBg }}>
               <div onClick={()=>toggle(room.id)} style={{ display:"flex", alignItems:"center", gap:10, padding:"13px 16px", cursor:"pointer", background:cardBg, userSelect:"none" }}>
-                <div style={{ width:9, height:9, borderRadius:"50%", flexShrink:0, background:due?T.red:(room.status==="rented"?T.green:T.amber) }}/>
+                <div style={{ width:9, height:9, borderRadius:"50%", flexShrink:0, background:isOverdue?"#ea580c":(due?T.red:(room.status==="rented"?T.green:T.amber)), animation:isOverdue?"pulse 1s infinite":"none" }}/>
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ fontWeight:700, color:T.text, fontSize:15, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{room.communityName}</div>
-                  {!open && <div style={{ fontSize:12, color:T.textSub, marginTop:1, display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>{room.rent&&<span>{fmt(room.rent)}/月</span>}{room.tenantContactName&&<span>· {room.tenantContactName}</span>}{due&&<span style={{ color:T.red, fontWeight:700 }}>· ⚠️ 待繳租</span>}{near&&!due&&<span style={{ color:T.amber, fontWeight:700 }}>· 即將到期</span>}{isEvicting&&<span style={{ color:"#7c3aed", fontWeight:700 }}>· 💰 押金已退回</span>}{room.depositRefundStatus==="pending"&&<span style={{ color:"#7c3aed", fontWeight:700 }}>· 💰 押金退還申請中</span>}{(room.assignedAdmins||[]).length>0&&<span style={{ display:"inline-flex", gap:3, alignItems:"center" }}>{(room.assignedAdmins||[]).map(uid=>{const u=(data.users||[]).find(x=>x.id===uid);return u?<span key={uid} title={u.name} style={{ width:16,height:16,borderRadius:"50%",background:T.blue,color:"#fff",fontSize:9,fontWeight:700,display:"inline-flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>{u.avatar||u.name[0]}</span>:null;})}</span>}</div>}
+                  {!open && <div style={{ fontSize:12, color:T.textSub, marginTop:1, display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>{room.rent&&<span>{fmt(room.rent)}/月</span>}{room.tenantContactName&&<span>· {room.tenantContactName}</span>}{isOverdue&&<span style={{ color:"#ea580c", fontWeight:800, animation:"pulse 1s infinite" }}>· 🚨 逾期 {overdueDays} 天</span>}{due&&!isOverdue&&<span style={{ color:T.red, fontWeight:700 }}>· ⚠️ 待繳租</span>}{near&&!due&&!isOverdue&&<span style={{ color:T.amber, fontWeight:700 }}>· 即將到期</span>}{isEvicting&&<span style={{ color:"#7c3aed", fontWeight:700 }}>· 💰 押金已退回</span>}{room.depositRefundStatus==="pending"&&<span style={{ color:"#7c3aed", fontWeight:700 }}>· 💰 押金退還申請中</span>}{(room.assignedAdmins||[]).length>0&&<span style={{ display:"inline-flex", gap:3, alignItems:"center" }}>{(room.assignedAdmins||[]).map(uid=>{const u=(data.users||[]).find(x=>x.id===uid);return u?<span key={uid} title={u.name} style={{ width:16,height:16,borderRadius:"50%",background:T.blue,color:"#fff",fontSize:9,fontWeight:700,display:"inline-flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>{u.avatar||u.name[0]}</span>:null;})}</span>}</div>}
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
                   {due&&role.canEdit&&<button onClick={e=>{e.stopPropagation();markPaid(room);}} style={{ background:T.green, color:"#fff", border:"none", borderRadius:7, padding:"5px 11px", fontSize:12, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap", fontFamily:"inherit" }}>已繳租完畢</button>}
@@ -2686,7 +2763,7 @@ export default function RentKeeperApp() {
 
   return (
     <div style={{ minHeight:"100vh", background:T.bgSub, fontFamily:"'Noto Sans TC','PingFang TC',sans-serif", color:T.text, fontSize:15 }}>
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} *{box-sizing:border-box} select option{background:#fff;color:#111827}`}</style>
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} @keyframes warn-blink{0%,100%{background:#ea580c;box-shadow:0 0 0 rgba(234,88,12,0)}50%{background:#c2410c;box-shadow:0 0 12px rgba(234,88,12,0.7)}} *{box-sizing:border-box} select option{background:#fff;color:#111827}`}</style>
 
       {/* Header */}
       <div style={{ background:T.bg, borderBottom:`1px solid ${T.border}`, padding:"10px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", position:"sticky", top:0, zIndex:200 }}>
