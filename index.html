@@ -1537,7 +1537,7 @@ function Rooms({ data, currentUser, onUpdate }) {
   const [expanded, setExpanded] = useState(() => { const s = new Set(); if (isViewer && viewerRoomId) s.add(viewerRoomId); return s; });
   const toggle = (id) => setExpanded(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
-  const emptyForm = () => { const t = todayStr(); return { communityName:"", address:"", ownerName:"", salesRep:"", rentDay:"5", rent:"", leaseStart:t, contractEnd:addOneYear(t), tenantContactName:"", tenantContactPhone:"", cohabitants:[], renewals:[], contractPhoto:"", ownerBankPhoto:"", inspectionPhotos:[], autoRentRemind:false, rentalSubsidy:false, taxDeclaration:false, householdRegistration:false, roomType:"general", electricityType:"fixed", electricityFixedRate:"", waterType:"fixed", waterFixedRate:"", assignedAdmins:[], parkingSpots:[], lineNotifyToken:"" }; };
+  const emptyForm = () => { const t = todayStr(); return { communityName:"", address:"", ownerName:"", salesRep:"", rentDay:"5", rent:"", leaseStart:t, contractEnd:addOneYear(t), tenantContactName:"", tenantContactPhone:"", cohabitants:[], renewals:[], contractPhotos:[], ownerBankPhoto:"", inspectionPhotos:[], autoRentRemind:false, rentalSubsidy:false, taxDeclaration:false, householdRegistration:false, roomType:"general", electricityType:"fixed", electricityFixedRate:"", waterType:"fixed", waterFixedRate:"", assignedAdmins:[], parkingSpots:[], lineNotifyToken:"" }; };
   const newParkingSpot = (type, leaseStart, contractEnd) => ({ id:uid(), type, spotNo:"", linkedRoomId:"", rent:"", leaseStart:leaseStart||"", contractEnd:contractEnd||"", renewals:[] });
   const [showAdd, setShowAdd]     = useState(false);
   const [editRoom, setEditRoom]   = useState(null);
@@ -1595,9 +1595,17 @@ function Rooms({ data, currentUser, onUpdate }) {
     });
     e.target.value = "";
   };
+  const handleContractUpload = (e) => {
+    Array.from(e.target.files).forEach(file => {
+      const reader = new FileReader();
+      reader.onload = ev => setForm(f => ({ ...f, contractPhotos:[...(f.contractPhotos||[]), { id:uid(), dataUrl:ev.target.result, uploadedAt:nowISO() }] }));
+      reader.readAsDataURL(file);
+    });
+    e.target.value = "";
+  };
 
   const openEdit = (room) => {
-    setForm({ communityName:room.communityName||"", address:room.address||"", ownerName:room.ownerName||"", salesRep:room.salesRep||"", rentDay:room.rentDay||"5", rent:room.rent||"", leaseStart:room.leaseStart||"", contractEnd:room.contractEnd||"", tenantContactName:room.tenantContactName||"", tenantContactPhone:room.tenantContactPhone||"", cohabitants:(room.cohabitants||[]).map(c=>({name:c.name||"",phone:c.phone||""})), renewals:(room.renewals||[]).map(r=>({renewStart:r.renewStart||"",renewEnd:r.renewEnd||""})), contractPhoto:room.contractPhoto||"", ownerBankPhoto:room.ownerBankPhoto||"", inspectionPhotos:room.inspectionPhotos||[], autoRentRemind:room.autoRentRemind||false, rentalSubsidy:room.rentalSubsidy||false, taxDeclaration:room.taxDeclaration||false, householdRegistration:room.householdRegistration||false, roomType:room.roomType||"general", electricityType:room.electricityType||"fixed", electricityFixedRate:room.electricityFixedRate||"", waterType:room.waterType||"fixed", waterFixedRate:room.waterFixedRate||"", assignedAdmins:room.assignedAdmins||[], parkingSpots:(room.parkingSpots||[]).map(s=>({...s,renewals:(s.renewals||[]).map(r=>({...r}))})), lineNotifyToken:room.lineNotifyToken||"" });
+    setForm({ communityName:room.communityName||"", address:room.address||"", ownerName:room.ownerName||"", salesRep:room.salesRep||"", rentDay:room.rentDay||"5", rent:room.rent||"", leaseStart:room.leaseStart||"", contractEnd:room.contractEnd||"", tenantContactName:room.tenantContactName||"", tenantContactPhone:room.tenantContactPhone||"", cohabitants:(room.cohabitants||[]).map(c=>({name:c.name||"",phone:c.phone||""})), renewals:(room.renewals||[]).map(r=>({renewStart:r.renewStart||"",renewEnd:r.renewEnd||""})), contractPhotos:room.contractPhotos||(room.contractPhoto?[{id:uid(),dataUrl:room.contractPhoto,uploadedAt:""}]:[]), ownerBankPhoto:room.ownerBankPhoto||"", inspectionPhotos:room.inspectionPhotos||[], autoRentRemind:room.autoRentRemind||false, rentalSubsidy:room.rentalSubsidy||false, taxDeclaration:room.taxDeclaration||false, householdRegistration:room.householdRegistration||false, roomType:room.roomType||"general", electricityType:room.electricityType||"fixed", electricityFixedRate:room.electricityFixedRate||"", waterType:room.waterType||"fixed", waterFixedRate:room.waterFixedRate||"", assignedAdmins:room.assignedAdmins||[], parkingSpots:(room.parkingSpots||[]).map(s=>({...s,renewals:(s.renewals||[]).map(r=>({...r}))})), lineNotifyToken:room.lineNotifyToken||"" });
     setShowRenew((room.renewals || []).length > 0);
     setShowParking((room.parkingSpots||[]).length > 0);
     setOpenParkingIds(new Set()); setParkingRenewIds(new Set());
@@ -1926,12 +1934,25 @@ function Rooms({ data, currentUser, onUpdate }) {
                     );
                   })()}
 
-                  {(room.contractPhoto || room.ownerBankPhoto) && <div style={{ display:"flex", gap:8, marginBottom:10 }}>
-                    {room.contractPhoto&&<div style={{ flex:1, display:"flex", gap:4 }}>
-                      <button onClick={()=>setViewPhoto(room.contractPhoto)} style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:7, padding:"7px", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>📄 租約電子檔</button>
-                      <a href={room.contractPhoto} download="租約電子檔.jpg" title="下載" style={{ background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:7, padding:"7px 10px", fontSize:13, display:"flex", alignItems:"center", textDecoration:"none" }}>⬇️</a>
-                    </div>}
-                    {room.ownerBankPhoto&&<div style={{ flex:1, display:"flex", gap:4 }}>
+                  {((room.contractPhotos||[]).length>0||(room.contractPhoto&&!(room.contractPhotos||[]).length)||room.ownerBankPhoto) && <div style={{ marginBottom:10 }}>
+                    {/* 租約電子檔（多張） */}
+                    {(()=>{
+                      const photos = room.contractPhotos||(room.contractPhoto?[{id:"legacy",dataUrl:room.contractPhoto}]:[]);
+                      return photos.length>0&&(
+                        <div style={{ marginBottom:8 }}>
+                          <div style={{ fontSize:12, fontWeight:700, color:T.textSub, marginBottom:6 }}>📄 租約電子檔</div>
+                          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                            {photos.map((p,i)=>(
+                              <div key={p.id||i} style={{ position:"relative" }}>
+                                <img src={p.dataUrl} style={{ width:64, height:64, borderRadius:7, objectFit:"cover", cursor:"pointer", border:`1px solid ${T.border}` }} onClick={()=>setViewPhoto(p.dataUrl)}/>
+                                <a href={p.dataUrl} download={`租約電子檔_${i+1}.jpg`} title="下載" style={{ position:"absolute", bottom:3, right:3, background:"rgba(0,0,0,0.52)", color:"#fff", borderRadius:4, padding:"2px 5px", fontSize:10, textDecoration:"none", lineHeight:1 }}>⬇</a>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    {room.ownerBankPhoto&&<div style={{ display:"flex", gap:4 }}>
                       <button onClick={()=>setViewPhoto(room.ownerBankPhoto)} style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:7, padding:"7px", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>🏦 匯款帳號</button>
                       <a href={room.ownerBankPhoto} download="屋主匯款帳號.jpg" title="下載" style={{ background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:7, padding:"7px 10px", fontSize:13, display:"flex", alignItems:"center", textDecoration:"none" }}>⬇️</a>
                     </div>}
@@ -2283,11 +2304,22 @@ function Rooms({ data, currentUser, onUpdate }) {
           {/* 照片區 */}
           <div style={{ fontSize:12, color:T.blue, fontWeight:700, marginBottom:10, marginTop:4, letterSpacing:"0.06em" }}>照片</div>
           <div style={{ marginBottom:10 }}>
-            <label style={S.label}>租約電子檔 <span style={{ fontWeight:400, color:T.textMuted }}>（所有人可讀取下載）</span></label>
-            <input ref={fileRef} type="file" accept="image/*" onChange={e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>setForm(fm=>({...fm,contractPhoto:ev.target.result})); r.readAsDataURL(f); }} style={{ display:"none" }}/>
-            <button onClick={()=>fileRef.current?.click()} style={{ ...S.btn(T.textSub,true), width:"100%", justifyContent:"center", marginBottom:4 }}>
-              {form.contractPhoto ? "✅ 已上傳（點擊更換）" : "選擇照片"}
+            <label style={S.label}>租約電子檔 <span style={{ fontWeight:400, color:T.textMuted }}>（所有人可讀取下載，可多張）</span></label>
+            <input ref={fileRef} type="file" accept="image/*" multiple onChange={handleContractUpload} style={{ display:"none" }}/>
+            <button onClick={()=>fileRef.current?.click()} style={{ ...S.btn(T.textSub,true), width:"100%", justifyContent:"center", marginBottom:8 }}>
+              📄 上傳租約（可多張）
             </button>
+            {(form.contractPhotos||[]).length>0&&(
+              <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:4 }}>
+                {(form.contractPhotos||[]).map((p,i)=>(
+                  <div key={p.id||i} style={{ position:"relative" }}>
+                    <img src={p.dataUrl} style={{ width:72, height:72, borderRadius:7, objectFit:"cover", border:`1px solid ${T.border}`, cursor:"pointer" }} onClick={()=>setViewPhoto(p.dataUrl)}/>
+                    <button onClick={()=>setForm(f=>({...f,contractPhotos:f.contractPhotos.filter((_,j)=>j!==i)}))}
+                      style={{ position:"absolute", top:-5, right:-5, width:18, height:18, borderRadius:"50%", background:T.red, color:"#fff", border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontFamily:"inherit", padding:0 }}>✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           {/* 屋主匯款帳號：所有人可讀取下載，管理員以上可上傳修改 */}
           <div style={{ marginBottom:10 }}>
