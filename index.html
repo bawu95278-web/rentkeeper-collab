@@ -2191,7 +2191,7 @@ function Rooms({ data, currentUser, onUpdate }) {
             const updateSpot = (id,patch) => setForm(f=>({...f,parkingSpots:f.parkingSpots.map(s=>s.id===id?{...s,...patch}:s)}));
             const delSpot    = id => { setForm(f=>({...f,parkingSpots:f.parkingSpots.filter(s=>s.id!==id)})); setOpenParkingIds(prev=>{const n=new Set(prev);n.delete(id);return n;}); };
             const addSpot    = type => { const ns=newParkingSpot(type,form.leaseStart,form.contractEnd); setForm(f=>({...f,parkingSpots:[...(f.parkingSpots||[]),ns]})); setOpenParkingIds(prev=>new Set([...prev,ns.id])); };
-            const ParkingSpotBlock = ({spot})=>{
+            const renderParkingSpotBlock = (spot)=>{
               const open=openParkingIds.has(spot.id);
               const showR=parkingRenewIds.has(spot.id);
               return (
@@ -2252,14 +2252,14 @@ function Rooms({ data, currentUser, onUpdate }) {
                     <button onClick={()=>addSpot("car")} style={{ ...S.btn(T.blue,true), fontSize:11, padding:"3px 10px" }}><Icon n="plus" s={11}/> 新增</button>
                   </div>
                   {carSpots.length===0&&<div style={{ textAlign:"center", color:T.textMuted, fontSize:12, padding:"6px 0 10px" }}>尚無汽車車位</div>}
-                  {carSpots.map(s=><ParkingSpotBlock key={s.id} spot={s}/>)}
+                  {carSpots.map(s=><React.Fragment key={s.id}>{renderParkingSpotBlock(s)}</React.Fragment>)}
                   {/* 機車車位 */}
                   <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginTop:4, marginBottom:8 }}>
                     <span style={{ fontSize:12, fontWeight:700, color:T.text }}>🛵 機車車位</span>
                     <button onClick={()=>addSpot("moto")} style={{ ...S.btn(T.blue,true), fontSize:11, padding:"3px 10px" }}><Icon n="plus" s={11}/> 新增</button>
                   </div>
                   {motoSpots.length===0&&<div style={{ textAlign:"center", color:T.textMuted, fontSize:12, padding:"6px 0 4px" }}>尚無機車車位</div>}
-                  {motoSpots.map(s=><ParkingSpotBlock key={s.id} spot={s}/>)}
+                  {motoSpots.map(s=><React.Fragment key={s.id}>{renderParkingSpotBlock(s)}</React.Fragment>)}
                 </div>}
               </div>
             );
