@@ -3197,10 +3197,14 @@ function RentKeeperApp() {
     (async () => {
       let d = await loadData();
       if (d) {
-        d = await migratePasswords(d); // 將舊版明文密碼升級為 SHA-256
+        d = await migratePasswords(d);
+        // 補上 DEFAULT_DATA 中新增但 localStorage 尚未存在的帳號
+        const existingIds = new Set((d.users||[]).map(u => u.id));
+        const missingUsers = DEFAULT_DATA.users.filter(u => !existingIds.has(u.id));
+        if (missingUsers.length) d = { ...d, users: [...d.users, ...missingUsers] };
         await saveData(d);
       } else {
-        d = DEFAULT_DATA; // DEFAULT_DATA 已是 SHA-256
+        d = DEFAULT_DATA;
         await saveData(d);
       }
       setData(d);
