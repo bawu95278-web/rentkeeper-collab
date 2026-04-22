@@ -21,7 +21,7 @@
     };
   </script>
   <script type="text/babel" data-presets="react">
-import { useState, useEffect, useCallback, useRef } from "react";
+const { useState, useEffect, useCallback, useRef } = React;
 
 // ═══════════════════════════════════════════════════════
 //  STORAGE (in-memory for JSX artifact environment)
@@ -3173,7 +3173,7 @@ function ActivityLog({ data, currentUser, onUpdate }) {
 // ═══════════════════════════════════════════════════════
 //  MAIN APP
 // ═══════════════════════════════════════════════════════
-export default function RentKeeperApp() {
+function RentKeeperApp() {
   const [data, setData] = useState(null);
   const [user, setUser] = useState(null);
   const [tab, setTab]   = useState("dashboard");
@@ -3468,6 +3468,8 @@ export default function RentKeeperApp() {
     </div>
   );
 }
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(RentKeeperApp));
 
 </script>
 </body>
