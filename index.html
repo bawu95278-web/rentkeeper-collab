@@ -2775,13 +2775,104 @@ function UserManagement({ data, currentUser, onUpdate }) {
 //  ACTIVITY LOG
 // ═══════════════════════════════════════════════════════
 function ActivityLog({ data, currentUser, onUpdate }) {
-  const { activityLog, users } = data;
+  const { activityLog, users, bills, rooms, repairs } = data;
   const isSA    = isSARole(currentUser?.role);
   const isAdmin = currentUser?.role === "admin";
-  const canExportLog = isSA || isAdmin; // 管理員以上都能匯出記錄
+  const canExportLog = isSA || isAdmin;
 
+  const thisYear = new Date().getFullYear();
   const [confirmClear,     setConfirmClear]     = useState(false);
   const [confirmExportLog, setConfirmExportLog] = useState(false);
+  const [showPL,           setShowPL]           = useState(false);
+  const [plYear,           setPlYear]           = useState(thisYear);
+
+  // ── 年度損益計算 ──────────────────────────────────────
+  const plBillYears = [...new Set((bills||[]).map(b=>b.month?.slice(0,4)).filter(Boolean).map(Number))];
+  const plYears = [...new Set([...plBillYears, thisYear-1, thisYear])].sort((a,b)=>b-a);
+
+  const buildPLData = (yr) => {
+    const yrStr = String(yr);
+    return Array.from({ length: 12 }, (_, i) => {
+      const mo = `${yr}-${String(i+1).padStart(2,"0")}`;
+      const mb = (bills||[]).filter(b => b.month === mo);
+      const collected   = mb.filter(b=>b.status==="paid").reduce((s,b)=>s+(b.amount||0), 0);
+      const uncollected = mb.filter(b=>b.status==="unpaid").reduce((s,b)=>s+(b.amount||0), 0);
+      const expected    = collected + uncollected;
+      const rate        = expected > 0 ? Math.round((collected/expected)*100) : null;
+      const roomIds     = [...new Set(mb.map(b=>b.roomId))];
+      const repairCnt   = (repairs||[]).filter(r => {
+        const d = r.date||"";
+        return d.startsWith(mo) && roomIds.includes(r.roomId);
+      }).length;
+      return { mo, roomCount: roomIds.length, expected, collected, uncollected, rate, repairCnt };
+    });
+  };
+
+  const plMonthly = buildPLData(plYear);
+  const plTotalExpected    = plMonthly.reduce((s,m)=>s+m.expected, 0);
+  const plTotalCollected   = plMonthly.reduce((s,m)=>s+m.collected, 0);
+  const plTotalUncollected = plMonthly.reduce((s,m)=>s+m.uncollected, 0);
+  const plAvgRate          = plTotalExpected > 0 ? Math.round((plTotalCollected/plTotalExpected)*100) : null;
+
+  // ── 匯出損益表 CSV ────────────────────────────────────
+  const exportPLCSV = () => {
+    const BOM = "\uFEFF";
+    const rocYr = plYear - 1911;
+    const esc = s => { const str=String(s||""); return /[,"\n\r]/.test(str)?`"${str.replace(/"/g,'""')}"`:str; };
+
+    const companyName = "家樂美房產管理顧問有限公司";
+    const titleRow    = [`${companyName}　民國 ${rocYr} 年度損益表`];
+    const genRow      = [`製表日期：${toROC(new Date().toISOString().slice(0,10))}　製表人：${currentUser?.name||""}`];
+    const blank       = [];
+    const header      = ["月份","出租間數","應收租金(NT$)","已收租金(NT$)","未收租金(NT$)","收租率(%)","報修筆數"];
+
+    const rows = plMonthly.map((m, i) => [
+      esc(`${rocYr}年${i+1}月`),
+      esc(m.roomCount || 0),
+      esc(m.expected),
+      esc(m.collected),
+      esc(m.uncollected),
+      m.rate != null ? esc(m.rate+"%") : esc("—"),
+      esc(m.repairCnt),
+    ]);
+
+    const totalRow = [
+      esc("全年合計"),
+      esc("—"),
+      esc(plTotalExpected),
+      esc(plTotalCollected),
+      esc(plTotalUncollected),
+      plAvgRate != null ? esc(plAvgRate+"%") : esc("—"),
+      esc(plMonthly.reduce((s,m)=>s+m.repairCnt,0)),
+    ];
+
+    const lines = [
+      titleRow.join(","),
+      genRow.join(","),
+      blank.join(","),
+      header.map(esc).join(","),
+      ...rows.map(r=>r.join(",")),
+      totalRow.join(","),
+    ];
+
+    const csv  = BOM + lines.join("\n");
+    const blob = new Blob([csv], { type:"text/csv;charset=utf-8;" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `家樂美_${rocYr}年度損益表.csv`;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+
+    onUpdate(d => ({
+      ...d,
+      activityLog: [...d.activityLog, {
+        id: uid(), userId: currentUser?.id,
+        action: `匯出民國 ${rocYr} 年度損益表 CSV`,
+        timestamp: nowISO(),
+      }],
+    }));
+  };
 
   // ── 一鍵匯出操作記錄（CSV，可直接用 Excel 開啟）──────
   const exportLogCSV = () => {
@@ -2865,7 +2956,13 @@ function ActivityLog({ data, currentUser, onUpdate }) {
       {/* ── 操作按鈕區 ── */}
       <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:20 }}>
 
-        {/* 一鍵匯出記錄（管理員 + 後台維修） */}
+        {/* 年度損益表 + 一鍵匯出記錄（管理員 + 後台維修） */}
+        {canExportLog && (
+          <button onClick={()=>setShowPL(true)}
+            style={{ width:"100%", background:"#7c3aed", color:"#fff", border:"none", borderRadius:12, padding:"13px 16px", fontSize:15, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, fontFamily:"inherit", boxShadow:"0 4px 12px #7c3aed44" }}>
+            📊 匯出年度損益表
+          </button>
+        )}
         {canExportLog && (
           <button onClick={()=>setConfirmExportLog(true)}
             style={{ width:"100%", background:T.green, color:"#fff", border:"none", borderRadius:12, padding:"13px 16px", fontSize:15, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, fontFamily:"inherit", boxShadow:`0 4px 12px ${T.green}44` }}>
@@ -2895,6 +2992,106 @@ function ActivityLog({ data, currentUser, onUpdate }) {
           </div>
         )}
       </div>
+
+      {/* ── 年度損益表 Modal ── */}
+      {showPL && (
+        <Modal title="年度損益表" onClose={()=>setShowPL(false)} width={600}>
+          <div style={{ paddingBottom:8 }}>
+            {/* 年份選擇器 */}
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
+              <div>
+                <div style={{ fontSize:13, color:T.textSub, fontWeight:700 }}>家樂美房產管理顧問有限公司</div>
+                <div style={{ fontSize:12, color:T.textMuted, marginTop:2 }}>製表日期：{toROC(new Date().toISOString().slice(0,10))}</div>
+              </div>
+              <select value={plYear} onChange={e=>setPlYear(Number(e.target.value))}
+                style={{ background:T.bg, border:`1px solid ${T.borderMd}`, borderRadius:8, color:T.text, padding:"6px 10px", fontSize:13, outline:"none", cursor:"pointer", fontFamily:"inherit" }}>
+                {plYears.map(y=><option key={y} value={y}>民國 {y-1911} 年</option>)}
+              </select>
+            </div>
+
+            {/* 統計卡片 */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:14 }}>
+              {[
+                { l:"全年應收租金",   v:fmt(plTotalExpected),    c:"#7c3aed", sub:"已收＋未收合計" },
+                { l:"全年已收租金",   v:fmt(plTotalCollected),   c:T.green,   sub:`佔應收 ${plAvgRate!=null?plAvgRate+"%" : "—"}` },
+                { l:"全年未收租金",   v:fmt(plTotalUncollected), c:T.red,     sub:"尚未繳清款項" },
+                { l:"全年收租率",     v:plAvgRate!=null?`${plAvgRate}%`:"—", c:plAvgRate>=90?T.green:plAvgRate>=70?T.amber:T.red, sub:"按已收/應收計算" },
+              ].map((s,i)=>(
+                <div key={i} style={{ background:T.bgSub, border:`1px solid ${T.border}`, borderRadius:10, padding:"11px 12px" }}>
+                  <div style={{ fontSize:11, color:T.textSub, fontWeight:700 }}>{s.l}</div>
+                  <div style={{ fontSize:17, fontWeight:800, color:s.c, margin:"4px 0 2px" }}>{s.v}</div>
+                  <div style={{ fontSize:11, color:T.textMuted }}>{s.sub}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* 月份明細表 */}
+            <div style={{ overflowX:"auto", borderRadius:8, border:`1px solid ${T.border}` }}>
+              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                <thead>
+                  <tr style={{ background:T.bgSub }}>
+                    {["月份","間數","應收","已收","未收","收租率"].map(h=>(
+                      <th key={h} style={{ padding:"8px 8px", textAlign:h==="月份"?"left":"right", color:T.textSub, fontWeight:700, fontSize:11, borderBottom:`1px solid ${T.border}`, whiteSpace:"nowrap" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {plMonthly.map((m,i)=>{
+                    const isCur = m.mo === new Date().toISOString().slice(0,7);
+                    const hasData = m.expected > 0;
+                    return (
+                      <tr key={i} style={{ background:isCur?T.accentBg:"transparent", borderBottom:`1px solid ${T.border}` }}>
+                        <td style={{ padding:"8px 8px", color:isCur?T.accent:T.text, fontWeight:isCur?700:500, whiteSpace:"nowrap" }}>
+                          {i+1} 月{isCur&&<span style={{ fontSize:10, color:T.accent, marginLeft:4 }}>●</span>}
+                        </td>
+                        <td style={{ padding:"8px 8px", textAlign:"right", color:hasData?T.text:T.textMuted }}>{hasData?`${m.roomCount} 間`:"—"}</td>
+                        <td style={{ padding:"8px 8px", textAlign:"right", color:hasData?T.text:T.textMuted, fontWeight:500 }}>{hasData?fmt(m.expected):"—"}</td>
+                        <td style={{ padding:"8px 8px", textAlign:"right", color:m.collected>0?T.green:T.textMuted, fontWeight:600 }}>{m.collected>0?fmt(m.collected):"—"}</td>
+                        <td style={{ padding:"8px 8px", textAlign:"right", color:m.uncollected>0?T.red:T.textMuted, fontWeight:600 }}>{m.uncollected>0?fmt(m.uncollected):"—"}</td>
+                        <td style={{ padding:"8px 8px", textAlign:"right" }}>
+                          {m.rate!=null
+                            ? <span style={{ color:m.rate>=90?T.green:m.rate>=70?T.amber:T.red, fontWeight:700 }}>{m.rate}%</span>
+                            : <span style={{ color:T.textMuted }}>—</span>
+                          }
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr style={{ background:T.bgSub, borderTop:`2px solid ${T.borderMd}` }}>
+                    <td style={{ padding:"9px 8px", fontWeight:800, color:T.text }}>全年合計</td>
+                    <td style={{ padding:"9px 8px", textAlign:"right", color:T.textMuted }}>—</td>
+                    <td style={{ padding:"9px 8px", textAlign:"right", color:T.text, fontWeight:800 }}>{fmt(plTotalExpected)}</td>
+                    <td style={{ padding:"9px 8px", textAlign:"right", color:T.green, fontWeight:800 }}>{fmt(plTotalCollected)}</td>
+                    <td style={{ padding:"9px 8px", textAlign:"right", color:T.red, fontWeight:800 }}>{fmt(plTotalUncollected)}</td>
+                    <td style={{ padding:"9px 8px", textAlign:"right", color:plAvgRate>=90?T.green:plAvgRate>=70?T.amber:T.red, fontWeight:800 }}>
+                      {plAvgRate!=null?`${plAvgRate}%`:"—"}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            {/* 備註 */}
+            <div style={{ marginTop:10, padding:"8px 12px", background:T.bgMuted, borderRadius:8, fontSize:11, color:T.textMuted, lineHeight:1.6 }}>
+              ⚠️ 備註：本損益表以帳單紀錄計算，應收 = 已收 ＋ 未收，收租率 = 已收 ÷ 應收。匯出為 CSV 可直接用 Excel 開啟。
+            </div>
+
+            {/* 匯出按鈕 */}
+            <div style={{ display:"flex", gap:10, marginTop:14 }}>
+              <button onClick={()=>setShowPL(false)}
+                style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"11px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>
+                關閉
+              </button>
+              <button onClick={exportPLCSV}
+                style={{ flex:2, background:"#7c3aed", color:"#fff", border:"none", borderRadius:8, padding:"11px", fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+                ⬇ 下載 CSV（可用 Excel 開啟）
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* ── 確認匯出記錄對話框 ── */}
       {confirmExportLog && (
