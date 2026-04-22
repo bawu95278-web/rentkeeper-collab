@@ -1540,8 +1540,36 @@ function Rooms({ data, currentUser, onUpdate }) {
   const [openParkingIds, setOpenParkingIds] = useState(new Set());
   const [parkingRenewIds, setParkingRenewIds] = useState(new Set());
   const [confirmDel, setConfirmDel]   = useState(null);
-  const [viewPhoto, setViewPhoto]     = useState(null);
+  const [viewPhoto, setViewPhoto]       = useState(null);
   const [contractRoom, setContractRoom] = useState(null);
+  const [lineRemind, setLineRemind]     = useState({}); // { [roomId]: "idle"|"sending"|"sent"|"error:<msg>" }
+
+  const sendLineReminder = async (room) => {
+    const token = room.lineNotifyToken?.trim();
+    if (!token) { setLineRemind(s=>({...s,[room.id]:"no_token"})); return; }
+    setLineRemind(s=>({...s,[room.id]:"sending"}));
+    const unpaidBills = (bills||[]).filter(b=>b.roomId===room.id&&b.status==="unpaid").sort((a,b)=>a.month.localeCompare(b.month));
+    const totalUnpaid = unpaidBills.reduce((s,b)=>s+(b.amount||0), 0);
+    const monthList   = unpaidBills.map(b=>toROCMonth(b.month)).join("、")||toROCMonth(thisMonthStr());
+    const amount      = totalUnpaid || room.rent || 0;
+    const msg = `\n⚠️ 租金催繳通知\n\n房源：${room.communityName}${room.address?" ("+room.address+")":""}\n催繳月份：${monthList}\n應繳金額：NT$ ${Number(amount).toLocaleString()}\n繳租日：每月 ${room.rentDay||5} 號\n\n請您盡速完成匯款並上傳匯款截圖，謝謝您的配合。\n— 家樂美房產管理顧問有限公司`;
+    try {
+      const fd = new FormData(); fd.append("message", msg);
+      const res = await fetch("https://notify-api.line.me/api/notify", {
+        method:"POST", headers:{ Authorization:`Bearer ${token}` }, body:fd
+      });
+      if (res.ok) {
+        setLineRemind(s=>({...s,[room.id]:"sent"}));
+        onUpdate(d=>({...d, activityLog:[...d.activityLog,{ id:uid(), userId:currentUser.id, action:`LINE 催繳通知「${room.communityName}」→ 已送達（${monthList}，NT$ ${Number(amount).toLocaleString()}）`, timestamp:nowISO() }]}));
+        setTimeout(()=>setLineRemind(s=>({...s,[room.id]:"idle"})), 4000);
+      } else {
+        const j = await res.json().catch(()=>({message:res.status}));
+        setLineRemind(s=>({...s,[room.id]:"error:"+(j.message||res.status)}));
+      }
+    } catch(e) {
+      setLineRemind(s=>({...s,[room.id]:"error:"+e.message}));
+    }
+  };
   const [openChat, setOpenChat]       = useState(null);
   const [chatInput, setChatInput]     = useState({});
   const [editTpl, setEditTpl]         = useState(false);
@@ -1796,16 +1824,49 @@ function Rooms({ data, currentUser, onUpdate }) {
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
                   {due&&role.canEdit&&<button onClick={e=>{e.stopPropagation();markPaid(room);}} style={{ background:T.green, color:"#fff", border:"none", borderRadius:7, padding:"5px 11px", fontSize:12, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap", fontFamily:"inherit" }}>已繳租完畢</button>}
+                  {(due||isOverdue)&&(isSA||isAdmin)&&(()=>{
+                    const rs = lineRemind[room.id]||"idle";
+                    const sent = rs==="sent"; const sending = rs==="sending"; const noToken = rs==="no_token"||!room.lineNotifyToken;
+                    return (
+                      <button onClick={e=>{e.stopPropagation();sendLineReminder(room);}} disabled={sending||sent}
+                        title={noToken?"⚠️ 尚未設定 LINE Token，請至編輯房源設定":"傳送 LINE 催繳通知"}
+                        style={{ background:sent?"#22c55e":sending?"#a78bfa":noToken?"#f3f4f6":"#06b6d4", color:sent||sending?"#fff":noToken?"#9ca3af":"#fff", border:noToken?"1px dashed #d1d5db":"none", borderRadius:7, padding:"5px 10px", fontSize:12, fontWeight:700, cursor:sending||sent?"default":"pointer", whiteSpace:"nowrap", fontFamily:"inherit", opacity:sending?0.8:1 }}>
+                        {sent?"✅ 已送出":sending?"傳送中…":"📲 LINE催繳"}
+                      </button>
+                    );
+                  })()}
                   <span style={S.tag(room.status==="rented"?T.green:T.amber)}>{SL[room.status]}</span>
                   <span style={{ color:T.textMuted, fontSize:11, transition:"transform 0.2s", transform:open?"rotate(180deg)":"rotate(0deg)", display:"inline-block" }}>▼</span>
                 </div>
               </div>
               {open && (
                 <div style={{ borderTop:`1px solid ${T.border}`, padding:"14px 16px" }}>
-                  {due && <div style={{ background:T.redBg, border:`1px solid ${T.red}55`, borderRadius:8, padding:"10px 12px", marginBottom:12, display:"flex", justifyContent:"space-between", alignItems:"center", gap:8 }}>
-                    <div style={{ color:T.red, fontWeight:700, fontSize:13 }}>⚠️ 本月租金待繳（每月 {room.rentDay} 號繳租）</div>
-                    {role.canEdit&&<button onClick={e=>{e.stopPropagation();markPaid(room);}} style={{ background:T.green, color:"#fff", border:"none", borderRadius:7, padding:"6px 14px", fontSize:13, fontWeight:700, cursor:"pointer", flexShrink:0, fontFamily:"inherit" }}>已繳租完畢</button>}
-                  </div>}
+                  {(due||isOverdue) && (()=>{
+                    const rs = lineRemind[room.id]||"idle";
+                    const sent = rs==="sent"; const sending = rs==="sending";
+                    const isErrState = rs.startsWith("error:"); const errMsg = isErrState?rs.slice(6):"";
+                    const noToken = !room.lineNotifyToken?.trim();
+                    return (
+                      <div style={{ background:isOverdue?"#fff7ed":T.redBg, border:`1px solid ${isOverdue?"#ea580c55":T.red+"55"}`, borderRadius:8, padding:"10px 12px", marginBottom:12 }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                          <div style={{ color:isOverdue?"#c2410c":T.red, fontWeight:700, fontSize:13 }}>
+                            {isOverdue?`🚨 租金逾期 ${overdueDays} 天（每月 ${room.rentDay} 號繳租）`:`⚠️ 本月租金待繳（每月 ${room.rentDay} 號繳租）`}
+                          </div>
+                          <div style={{ display:"flex", gap:8, flexShrink:0 }}>
+                            {(isSA||isAdmin)&&(
+                              <button onClick={e=>{e.stopPropagation();sendLineReminder(room);}} disabled={sending||sent}
+                                style={{ background:sent?"#22c55e":sending?"#a78bfa":noToken?"#f3f4f6":"#06b6d4", color:sent||sending?"#fff":noToken?"#6b7280":"#fff", border:noToken?"1px dashed #d1d5db":"none", borderRadius:7, padding:"6px 13px", fontSize:13, fontWeight:700, cursor:sending||sent?"default":"pointer", flexShrink:0, fontFamily:"inherit" }}>
+                                {sent?"✅ 催繳通知已送出":sending?"傳送中…":"📲 LINE 催繳通知"}
+                              </button>
+                            )}
+                            {role.canEdit&&<button onClick={e=>{e.stopPropagation();markPaid(room);}} style={{ background:T.green, color:"#fff", border:"none", borderRadius:7, padding:"6px 14px", fontSize:13, fontWeight:700, cursor:"pointer", flexShrink:0, fontFamily:"inherit" }}>已繳租完畢</button>}
+                          </div>
+                        </div>
+                        {(isSA||isAdmin)&&noToken&&<div style={{ marginTop:8, fontSize:12, color:"#92400e", background:"#fffbeb", border:"1px solid #fbbf2444", borderRadius:6, padding:"6px 10px" }}>⚠️ 此房源尚未設定 LINE Notify Token，請至「編輯房源」最底部設定租客的 Token 後即可一鍵催繳。</div>}
+                        {isErrState&&<div style={{ marginTop:8, fontSize:12, color:T.red, background:T.redBg, border:`1px solid ${T.red}33`, borderRadius:6, padding:"6px 10px" }}>❌ 傳送失敗：{errMsg}</div>}
+                      </div>
+                    );
+                  })()}
                   {room.address&&<div style={{ fontSize:13, color:T.textSub, marginBottom:8 }}>📍 {room.address}</div>}
                   {(isSA||isAdmin) && (room.tenantContactName||(room.cohabitants||[]).length>0) && (
                     <div style={{ background:T.bgSub, borderRadius:8, padding:"10px 12px", marginBottom:10, border:`1px solid ${T.border}` }}>
