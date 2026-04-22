@@ -3409,7 +3409,13 @@ function RentKeeperApp() {
             <Icon n="bell" s={20}/>
             {notifications.some(n=>!n.read)&&<div style={{ position:"absolute", top:2, right:2, width:8, height:8, background:T.red, borderRadius:"50%", border:`2px solid ${T.bg}`, animation:"pulse 1.5s infinite" }}/>}
           </button>
-          <AvatarBadge user={{...user,online:true}} size={28}/>
+          <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+            <AvatarBadge user={{...user,online:true}} size={28}/>
+            <div style={{ display:"flex", flexDirection:"column", lineHeight:1.2 }}>
+              <span style={{ fontSize:12, fontWeight:700, color:T.text }}>{user.name}</span>
+              <span style={{ fontSize:10, fontWeight:600, color:safeRole(user.role).color }}>{safeRole(user.role).label}</span>
+            </div>
+          </div>
           {/* 身份切換按鈕 */}
           {(switchOptions.length > 0 || isImpersonating) && (
             <div style={{ position:"relative" }}>
