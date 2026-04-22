@@ -131,6 +131,12 @@ const toROC = (s, t=false) => {
 };
 const toROCMonth = (s) => { if (!s) return "—"; const p=s.split("-"); return p.length>=2?`民國${parseInt(p[0])-1911}年${p[1]}月`:s; };
 const SL = { rented:"已出租", vacant:"空房", pending:"待處理", in_progress:"處理中", done:"已完成", paid:"已繳", unpaid:"未繳", rent:"租金", electric:"電費" };
+const csvEsc = (s) => { const str=String(s??""); return /[,"\n\r]/.test(str)?`"${str.replace(/"/g,'""')}"`:str; };
+const downloadCSV = (filename, content) => {
+  const url=URL.createObjectURL(new Blob([content],{type:"text/csv;charset=utf-8;"}));
+  const a=document.createElement("a"); a.href=url; a.download=filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+};
 
 // ═══════════════════════════════════════════════════════
 //  SECURITY — SHA-256, PASSWORD MIGRATION, LOCKOUT
@@ -1542,7 +1548,8 @@ function Rooms({ data, currentUser, onUpdate }) {
   const [confirmDel, setConfirmDel]   = useState(null);
   const [viewPhoto, setViewPhoto]       = useState(null);
   const [contractRoom, setContractRoom] = useState(null);
-  const [lineRemind, setLineRemind]     = useState({}); // { [roomId]: "idle"|"sending"|"sent"|"error:<msg>" }
+  const [lineRemind, setLineRemind]     = useState({});
+  const lineRemindTimer                 = useRef({});
 
   const sendLineReminder = async (room) => {
     const token = room.lineNotifyToken?.trim();
@@ -1554,14 +1561,15 @@ function Rooms({ data, currentUser, onUpdate }) {
     const amount      = totalUnpaid || room.rent || 0;
     const msg = `\n⚠️ 租金催繳通知\n\n房源：${room.communityName}${room.address?" ("+room.address+")":""}\n催繳月份：${monthList}\n應繳金額：NT$ ${Number(amount).toLocaleString()}\n繳租日：每月 ${room.rentDay||5} 號\n\n請您盡速完成匯款並上傳匯款截圖，謝謝您的配合。\n— 家樂美房產管理顧問有限公司`;
     try {
-      const fd = new FormData(); fd.append("message", msg);
+      const body = new URLSearchParams(); body.append("message", msg);
       const res = await fetch("https://notify-api.line.me/api/notify", {
-        method:"POST", headers:{ Authorization:`Bearer ${token}` }, body:fd
+        method:"POST", headers:{ Authorization:`Bearer ${token}` }, body
       });
       if (res.ok) {
         setLineRemind(s=>({...s,[room.id]:"sent"}));
         onUpdate(d=>({...d, activityLog:[...d.activityLog,{ id:uid(), userId:currentUser.id, action:`LINE 催繳通知「${room.communityName}」→ 已送達（${monthList}，NT$ ${Number(amount).toLocaleString()}）`, timestamp:nowISO() }]}));
-        setTimeout(()=>setLineRemind(s=>({...s,[room.id]:"idle"})), 4000);
+        clearTimeout(lineRemindTimer.current[room.id]);
+        lineRemindTimer.current[room.id] = setTimeout(()=>setLineRemind(s=>({...s,[room.id]:"idle"})), 4000);
       } else {
         const j = await res.json().catch(()=>({message:res.status}));
         setLineRemind(s=>({...s,[room.id]:"error:"+(j.message||res.status)}));
@@ -2553,9 +2561,8 @@ function Repairs({ data, currentUser, onUpdate }) {
       setPanel(rep.id, { lineStatus:"no_token" });
       return;
     }
+    const note = getPanel(rep.id).note || rep.completionNote || "";
     setPanel(rep.id, { lineStatus:"sending" });
-    const panel = getPanel(rep.id);
-    const note = panel.note || rep.completionNote || "";
     const msg = `\n🔧 修繕完成通知\n\n房源：${rm?.communityName||""}${rm?.address?" ("+rm.address+")":""}\n報修項目：${rep.title}\n${note?"修繕說明："+note+"\n":""}完成日期：${toROC(todayStr())}\n修繕照片：${(rep.completionPhotos||[]).length+(panel.photos||[]).length} 張（請洽管理員查閱）\n\n如有問題請聯絡管理員，謝謝。\n— 家樂美房產管理顧問有限公司`;
     try {
       const body = new URLSearchParams(); body.append("message", msg);
@@ -2852,7 +2859,6 @@ function ActivityLog({ data, currentUser, onUpdate }) {
   const plYears = [...new Set([...plBillYears, thisYear-1, thisYear])].sort((a,b)=>b-a);
 
   const buildPLData = (yr) => {
-    const yrStr = String(yr);
     return Array.from({ length: 12 }, (_, i) => {
       const mo = `${yr}-${String(i+1).padStart(2,"0")}`;
       const mb = (bills||[]).filter(b => b.month === mo);
@@ -2877,110 +2883,42 @@ function ActivityLog({ data, currentUser, onUpdate }) {
 
   // ── 匯出損益表 CSV ────────────────────────────────────
   const exportPLCSV = () => {
-    const BOM = "\uFEFF";
     const rocYr = plYear - 1911;
-    const esc = s => { const str=String(s||""); return /[,"\n\r]/.test(str)?`"${str.replace(/"/g,'""')}"`:str; };
-
-    const companyName = "家樂美房產管理顧問有限公司";
-    const titleRow    = [`${companyName}　民國 ${rocYr} 年度損益表`];
-    const genRow      = [`製表日期：${toROC(new Date().toISOString().slice(0,10))}　製表人：${currentUser?.name||""}`];
-    const blank       = [];
-    const header      = ["月份","出租間數","應收租金(NT$)","已收租金(NT$)","未收租金(NT$)","收租率(%)","報修筆數"];
-
+    const header = ["月份","出租間數","應收租金(NT$)","已收租金(NT$)","未收租金(NT$)","收租率(%)","報修筆數"];
     const rows = plMonthly.map((m, i) => [
-      esc(`${rocYr}年${i+1}月`),
-      esc(m.roomCount || 0),
-      esc(m.expected),
-      esc(m.collected),
-      esc(m.uncollected),
-      m.rate != null ? esc(m.rate+"%") : esc("—"),
-      esc(m.repairCnt),
+      csvEsc(`${rocYr}年${i+1}月`), csvEsc(m.roomCount||0), csvEsc(m.expected), csvEsc(m.collected), csvEsc(m.uncollected),
+      m.rate!=null?csvEsc(m.rate+"%"):csvEsc("—"), csvEsc(m.repairCnt),
     ]);
-
     const totalRow = [
-      esc("全年合計"),
-      esc("—"),
-      esc(plTotalExpected),
-      esc(plTotalCollected),
-      esc(plTotalUncollected),
-      plAvgRate != null ? esc(plAvgRate+"%") : esc("—"),
-      esc(plMonthly.reduce((s,m)=>s+m.repairCnt,0)),
+      csvEsc("全年合計"), csvEsc("—"), csvEsc(plTotalExpected), csvEsc(plTotalCollected), csvEsc(plTotalUncollected),
+      plAvgRate!=null?csvEsc(plAvgRate+"%"):csvEsc("—"), csvEsc(plMonthly.reduce((s,m)=>s+m.repairCnt,0)),
     ];
-
     const lines = [
-      titleRow.join(","),
-      genRow.join(","),
-      blank.join(","),
-      header.map(esc).join(","),
+      csvEsc(`家樂美房產管理顧問有限公司　民國 ${rocYr} 年度損益表`),
+      csvEsc(`製表日期：${toROC(new Date().toISOString().slice(0,10))}　製表人：${currentUser?.name||""}`),
+      "",
+      header.map(csvEsc).join(","),
       ...rows.map(r=>r.join(",")),
       totalRow.join(","),
     ];
-
-    const csv  = BOM + lines.join("\n");
-    const blob = new Blob([csv], { type:"text/csv;charset=utf-8;" });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement("a");
-    a.href     = url;
-    a.download = `家樂美_${rocYr}年度損益表.csv`;
-    document.body.appendChild(a); a.click();
-    document.body.removeChild(a); URL.revokeObjectURL(url);
-
+    downloadCSV(`家樂美_${rocYr}年度損益表.csv`, "\uFEFF"+lines.join("\n"));
     onUpdate(d => ({
       ...d,
-      activityLog: [...d.activityLog, {
-        id: uid(), userId: currentUser?.id,
-        action: `匯出民國 ${rocYr} 年度損益表 CSV`,
-        timestamp: nowISO(),
-      }],
+      activityLog: [...d.activityLog, { id:uid(), userId:currentUser?.id, action:`匯出民國 ${rocYr} 年度損益表 CSV`, timestamp:nowISO() }],
     }));
   };
 
-  // ── 一鍵匯出操作記錄（CSV，可直接用 Excel 開啟）──────
   const exportLogCSV = () => {
     const today = new Date().toISOString().slice(0, 10);
-    const BOM   = "\uFEFF"; // UTF-8 BOM，讓 Excel 正確顯示中文
-
-    // 標題列
-    const header = ["時間", "操作人員", "角色", "操作內容"].join(",");
-
-    // 資料列（從舊到新）
-    const rows = [...(activityLog || [])]
-      .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+    const header = ["時間","操作人員","角色","操作內容"].map(csvEsc).join(",");
+    const rows = [...(activityLog||[])]
+      .sort((a,b)=>new Date(a.timestamp)-new Date(b.timestamp))
       .map(log => {
-        const u  = (users || []).find(u => u.id === log.userId);
-        const lr = u ? safeRole(u.role).label : "—";
-        // CSV 欄位：若包含逗號或換行則用雙引號包覆，並跳脫內部雙引號
-        const escape = (s) => {
-          const str = String(s || "");
-          return /[,"\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
-        };
-        return [
-          escape(toROC(log.timestamp, true)),
-          escape(u?.name || "系統"),
-          escape(lr),
-          escape(log.action),
-        ].join(",");
+        const u = (users||[]).find(u=>u.id===log.userId);
+        return [csvEsc(toROC(log.timestamp,true)), csvEsc(u?.name||"系統"), csvEsc(u?safeRole(u.role).label:"—"), csvEsc(log.action)].join(",");
       });
-
-    const csv  = BOM + [header, ...rows].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement("a");
-    a.href     = url;
-    a.download = `家樂美_操作記錄_${today}.csv`;
-    document.body.appendChild(a); a.click();
-    document.body.removeChild(a); URL.revokeObjectURL(url);
-
-    // 記錄此動作後清空
-    const ts = new Date().toISOString();
-    onUpdate(d => ({
-      ...d,
-      activityLog: [{
-        id: uid(), userId: currentUser?.id,
-        action: `匯出操作記錄 CSV（共 ${(activityLog || []).length} 筆），並清空記錄`,
-        timestamp: ts,
-      }],
-    }));
+    downloadCSV(`家樂美_操作記錄_${today}.csv`, "\uFEFF"+[header,...rows].join("\n"));
+    onUpdate(d=>({...d, activityLog:[{ id:uid(), userId:currentUser?.id, action:`匯出操作記錄 CSV（共 ${(activityLog||[]).length} 筆），並清空記錄`, timestamp:new Date().toISOString() }]}));
     setConfirmExportLog(false);
   };
 
