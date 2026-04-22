@@ -32,13 +32,16 @@ const storage = window.storage;
 //  ROLES
 // ═══════════════════════════════════════════════════════
 const ROLES = {
-  superadmin: { label: "後台維修", color: "#dc2626", badge: "★", canEdit: true, canDelete: true, canManageUsers: true, canViewFinance: true, pages: ["dashboard","rooms","tenants","bills","repairs","report","users","log"] },
-  admin:      { label: "管理員",   color: "#2563eb", badge: "▲", canEdit: true, canDelete: false, canManageUsers: false, canViewFinance: true, pages: ["dashboard","rooms","tenants","bills","repairs","report","users","log"] },
-  staff:      { label: "工作人員", color: "#d97706", badge: "●", canEdit: true, canDelete: false, canManageUsers: false, canViewFinance: false, pages: ["tenants","repairs"] },
-  viewer:     { label: "租客",     color: "#6b7280", badge: "○", canEdit: false, canDelete: false, canManageUsers: false, canViewFinance: false, pages: ["rooms","bills","repairs"] },
-  system:     { label: "系統",     color: "#9ca3af", badge: "◆", canEdit: false, canDelete: false, canManageUsers: false, canViewFinance: false, pages: [] },
+  superadmin: { label: "後台維修",  color: "#dc2626", badge: "★", canEdit: true, canDelete: true, canManageUsers: true, canViewFinance: true, pages: ["dashboard","rooms","tenants","bills","repairs","report","users","log"] },
+  finance:    { label: "財務/行政", color: "#7c3aed", badge: "◆", canEdit: true, canDelete: true, canManageUsers: true, canViewFinance: true, pages: ["dashboard","rooms","tenants","bills","repairs","report","users","log"] },
+  admin:      { label: "管理員",    color: "#2563eb", badge: "▲", canEdit: true, canDelete: false, canManageUsers: false, canViewFinance: true, pages: ["dashboard","rooms","tenants","bills","repairs","report","users","log"] },
+  staff:      { label: "工作人員",  color: "#d97706", badge: "●", canEdit: true, canDelete: false, canManageUsers: false, canViewFinance: false, pages: ["tenants","repairs"] },
+  viewer:     { label: "租客",      color: "#6b7280", badge: "○", canEdit: false, canDelete: false, canManageUsers: false, canViewFinance: false, pages: ["rooms","bills","repairs"] },
+  system:     { label: "系統",      color: "#9ca3af", badge: "◆", canEdit: false, canDelete: false, canManageUsers: false, canViewFinance: false, pages: [] },
 };
-const safeRole = (r) => ROLES[r] || ROLES.viewer;
+const safeRole  = (r) => ROLES[r] || ROLES.viewer;
+// 後台維修 + 財務/行政 共享的最高權限判斷
+const isSARole  = (role) => role === "superadmin" || role === "finance";
 
 // ═══════════════════════════════════════════════════════
 //  DEFAULT DATA
@@ -323,9 +326,10 @@ function LoginScreen({ users, tenants, onLogin }) {
     { key:"tenant",     label:"租客",     icon:"person", color:"#6b7280", bg:"#f3f4f6" },
     { key:"admin",      label:"管理員",   icon:"shield", color:"#2563eb", bg:"#eff6ff" },
     { key:"superadmin", label:"後台維修", icon:"build",  color:"#dc2626", bg:"#fef2f2" },
+    { key:"finance",    label:"財務/行政",icon:"dollar", color:"#7c3aed", bg:"#faf5ff" },
   ];
-  const roleLabel = { tenant:"租客", admin:"管理員", superadmin:"後台維修" };
-  const roleColor = { tenant:"#6b7280", admin:"#2563eb", superadmin:"#dc2626" };
+  const roleLabel = { tenant:"租客", admin:"管理員", superadmin:"後台維修", finance:"財務/行政" };
+  const roleColor = { tenant:"#6b7280", admin:"#2563eb", superadmin:"#dc2626", finance:"#7c3aed" };
 
   // ── 初始化：從 localStorage 載入上次的記住我憑證 ────────
   const initCreds = loadCreds();
@@ -338,6 +342,7 @@ function LoginScreen({ users, tenants, onLogin }) {
     tenant:     initCreds.tenant?.rememberMe     || false,
     admin:      initCreds.admin?.rememberMe      || false,
     superadmin: initCreds.superadmin?.rememberMe || false,
+    finance:    initCreds.finance?.rememberMe    || false,
   });
   const [err, setErr]         = useState("");
   const [loading, setLoading] = useState(false);
@@ -712,6 +717,21 @@ function Dashboard({ data, currentUser, onUpdate }) {
     return { ...r, _end:end, _days:days, _name:r.tenantContactName||t?.name||"" };
   }).filter(r=>r._end&&r._days!==null&&r._days<=45&&r._days>0);
   const onlineUsers = users.filter(u=>u.online&&u.id!==currentUser.id);
+  const isFinanceDash = currentUser.role === "finance";
+  // 押金退還待處理（finance 專屬提醒）
+  const depositPending = rooms.filter(r => r.depositRefundStatus === "pending");
+  // 押金已退還、等待兩日解散的房源
+  const depositEvicting = rooms.filter(r => r.depositRefundStatus === "refunded" && !r.depositEvictionDone);
+
+  const doRefundDeposit = (room) => {
+    const evictAt = new Date(Date.now() + 2*24*60*60*1000).toISOString();
+    onUpdate(d=>({ ...d,
+      rooms: d.rooms.map(r => r.id===room.id
+        ? { ...r, depositRefundStatus:"refunded", depositRefundedBy:currentUser.id, depositRefundedAt:nowISO(), depositEvictionAt:evictAt }
+        : r),
+      activityLog: [...d.activityLog, { id:uid(), userId:currentUser.id, action:`【押金退還】「${room.communityName}」已確認退還押金，兩日後自動退租`, timestamp:nowISO() }]
+    }));
+  };
 
   const doRenew = (room) => {
     const newEnd = addOneYear(room._end);
@@ -754,6 +774,52 @@ function Dashboard({ data, currentUser, onUpdate }) {
               <button onClick={()=>doRenew(r)} style={{ flexShrink:0, background:T.red, color:"#fff", border:"none", borderRadius:8, padding:"7px 13px", fontSize:13, fontWeight:700, cursor:"pointer" }}>✅ 續約完畢</button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* ── 財務/行政 專屬：押金退還待處理通知 ── */}
+      {isFinanceDash && depositPending.length>0 && (
+        <div style={{ background:"#faf5ff", border:"2.5px solid #7c3aed", borderRadius:12, padding:"14px 16px", marginBottom:16 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+            <span style={{ fontSize:22 }}>💰</span>
+            <span style={{ fontSize:15, fontWeight:800, color:"#7c3aed" }}>押金退還申請待處理</span>
+            <span style={{ marginLeft:"auto", background:"#7c3aed", color:"#fff", borderRadius:99, fontSize:12, fontWeight:700, padding:"2px 9px" }}>{depositPending.length} 間</span>
+          </div>
+          {depositPending.map(r=>{
+            const requestUser = (users||[]).find(u=>u.id===r.depositRefundRequestedBy);
+            return (
+              <div key={r.id} style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 0", borderTop:"1px solid #7c3aed33" }}>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:14, fontWeight:700, color:"#7c3aed" }}>{r.communityName}</div>
+                  {r.address&&<div style={{ fontSize:12, color:"#7c3aed", opacity:0.8, marginTop:2 }}>📍 {r.address}</div>}
+                  {requestUser&&<div style={{ fontSize:11, color:"#9ca3af", marginTop:2 }}>申請人：{requestUser.name} · {toROC(r.depositRefundRequestedAt,true)}</div>}
+                </div>
+                <button onClick={()=>doRefundDeposit(r)} style={{ flexShrink:0, background:"#7c3aed", color:"#fff", border:"none", borderRadius:8, padding:"8px 14px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>✅ 已退還押金</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── 押金已退還、即將解散的房源提示 ── */}
+      {depositEvicting.length>0 && (
+        <div style={{ background:"#fffbeb", border:"1.5px solid #f59e0b", borderRadius:10, padding:"12px 14px", marginBottom:14 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:8 }}>
+            <span style={{ fontSize:16 }}>⏳</span>
+            <span style={{ fontSize:13, fontWeight:700, color:"#d97706" }}>押金已退回 · 即將自動解除</span>
+          </div>
+          {depositEvicting.map(r=>{
+            const evictDate = r.depositEvictionAt ? new Date(r.depositEvictionAt) : null;
+            const daysLeft = evictDate ? Math.max(0, Math.ceil((evictDate - Date.now()) / 86400000)) : null;
+            return (
+              <div key={r.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 0", borderTop:"1px solid #f59e0b44" }}>
+                <div style={{ flex:1 }}>
+                  <span style={{ fontSize:13, fontWeight:600, color:"#92400e" }}>{r.communityName}</span>
+                  {daysLeft!==null&&<span style={{ fontSize:12, color:"#d97706", marginLeft:8 }}>約 {daysLeft} 天後自動退租</span>}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -887,7 +953,7 @@ function PaymentRecords({ room, currentUser, isViewer, onUpdate, onViewPhoto }) 
 
   // 可刪除：superadmin 可刪全部；租客只能刪自己上傳的
   const canDelete = (rec) =>
-    currentUser.role === "superadmin" ||
+    isSARole(currentUser.role) ||
     (isViewer && rec.uploadedBy === currentUser.id);
 
   return (
@@ -902,7 +968,7 @@ function PaymentRecords({ room, currentUser, isViewer, onUpdate, onViewPhoto }) 
           )}
         </div>
         {/* 租客可上傳；管理員/後台也可以代為上傳 */}
-        {(isViewer || currentUser.role === "admin" || currentUser.role === "superadmin") && (
+        {(isViewer || currentUser.role === "admin" || isSARole(currentUser.role)) && (
           <button
             onClick={() => setShowUpload(v => !v)}
             style={{ background: showUpload ? T.bgMuted : T.accentBg, color: T.accent, border: `1px solid ${T.accent}44`, borderRadius: 7, padding: "4px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
@@ -1144,7 +1210,8 @@ function DefectPanel({ room, currentUser, onUpdate, onViewPhoto }) {
 function Rooms({ data, currentUser, onUpdate }) {
   const { rooms, tenants, bills } = data;
   const role       = safeRole(currentUser.role);
-  const isSA       = currentUser.role === "superadmin";
+  const isSA       = isSARole(currentUser.role);
+  const isFinance  = currentUser.role === "finance";
   const isAdmin    = currentUser.role === "admin";
   // ── 權限規則 ──────────────────────────────────────────
   // canEditRoom : superadmin + admin 都可以新增 / 編輯房源
@@ -1422,14 +1489,16 @@ function Rooms({ data, currentUser, onUpdate }) {
           const near = dl!==null&&dl<=60&&dl>0;
           const due  = isRentDue(room);
           const open = expanded.has(room.id);
-          const bc   = due?T.red:(near?T.amber+"99":T.border);
+          const isEvicting = room.depositRefundStatus==="refunded" && !room.depositEvictionDone;
+          const bc   = isEvicting?"#7c3aed":(due?T.red:(near?T.amber+"99":T.border));
+          const cardBg = isEvicting?"#faf5ff":(due?T.redBg:(near?T.amberBg:T.bg));
           return (
-            <div key={room.id} style={{ borderRadius:12, border:`${due?2:1}px solid ${bc}`, overflow:"hidden", background:T.bg }}>
-              <div onClick={()=>toggle(room.id)} style={{ display:"flex", alignItems:"center", gap:10, padding:"13px 16px", cursor:"pointer", background:due?T.redBg:(near?T.amberBg:T.bg), userSelect:"none" }}>
+            <div key={room.id} style={{ borderRadius:12, border:`${isEvicting||due?2:1}px solid ${bc}`, overflow:"hidden", background:cardBg }}>
+              <div onClick={()=>toggle(room.id)} style={{ display:"flex", alignItems:"center", gap:10, padding:"13px 16px", cursor:"pointer", background:cardBg, userSelect:"none" }}>
                 <div style={{ width:9, height:9, borderRadius:"50%", flexShrink:0, background:due?T.red:(room.status==="rented"?T.green:T.amber) }}/>
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ fontWeight:700, color:T.text, fontSize:15, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{room.communityName}</div>
-                  {!open && <div style={{ fontSize:12, color:T.textSub, marginTop:1, display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>{room.rent&&<span>{fmt(room.rent)}/月</span>}{room.tenantContactName&&<span>· {room.tenantContactName}</span>}{due&&<span style={{ color:T.red, fontWeight:700 }}>· ⚠️ 待繳租</span>}{near&&!due&&<span style={{ color:T.amber, fontWeight:700 }}>· 即將到期</span>}{(room.assignedAdmins||[]).length>0&&<span style={{ display:"inline-flex", gap:3, alignItems:"center" }}>{(room.assignedAdmins||[]).map(uid=>{const u=(data.users||[]).find(x=>x.id===uid);return u?<span key={uid} title={u.name} style={{ width:16,height:16,borderRadius:"50%",background:T.blue,color:"#fff",fontSize:9,fontWeight:700,display:"inline-flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>{u.avatar||u.name[0]}</span>:null;})}</span>}</div>}
+                  {!open && <div style={{ fontSize:12, color:T.textSub, marginTop:1, display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>{room.rent&&<span>{fmt(room.rent)}/月</span>}{room.tenantContactName&&<span>· {room.tenantContactName}</span>}{due&&<span style={{ color:T.red, fontWeight:700 }}>· ⚠️ 待繳租</span>}{near&&!due&&<span style={{ color:T.amber, fontWeight:700 }}>· 即將到期</span>}{isEvicting&&<span style={{ color:"#7c3aed", fontWeight:700 }}>· 💰 押金已退回</span>}{room.depositRefundStatus==="pending"&&<span style={{ color:"#7c3aed", fontWeight:700 }}>· 💰 押金退還申請中</span>}{(room.assignedAdmins||[]).length>0&&<span style={{ display:"inline-flex", gap:3, alignItems:"center" }}>{(room.assignedAdmins||[]).map(uid=>{const u=(data.users||[]).find(x=>x.id===uid);return u?<span key={uid} title={u.name} style={{ width:16,height:16,borderRadius:"50%",background:T.blue,color:"#fff",fontSize:9,fontWeight:700,display:"inline-flex",alignItems:"center",justifyContent:"center",flexShrink:0 }}>{u.avatar||u.name[0]}</span>:null;})}</span>}</div>}
                 </div>
                 <div style={{ display:"flex", alignItems:"center", gap:6, flexShrink:0 }}>
                   {due&&role.canEdit&&<button onClick={e=>{e.stopPropagation();markPaid(room);}} style={{ background:T.green, color:"#fff", border:"none", borderRadius:7, padding:"5px 11px", fontSize:12, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap", fontFamily:"inherit" }}>已繳租完畢</button>}
@@ -1444,7 +1513,7 @@ function Rooms({ data, currentUser, onUpdate }) {
                     {role.canEdit&&<button onClick={e=>{e.stopPropagation();markPaid(room);}} style={{ background:T.green, color:"#fff", border:"none", borderRadius:7, padding:"6px 14px", fontSize:13, fontWeight:700, cursor:"pointer", flexShrink:0, fontFamily:"inherit" }}>已繳租完畢</button>}
                   </div>}
                   {room.address&&<div style={{ fontSize:13, color:T.textSub, marginBottom:8 }}>📍 {room.address}</div>}
-                  {(currentUser.role==="superadmin"||currentUser.role==="admin") && (room.tenantContactName||(room.cohabitants||[]).length>0) && (
+                  {(isSA||isAdmin) && (room.tenantContactName||(room.cohabitants||[]).length>0) && (
                     <div style={{ background:T.bgSub, borderRadius:8, padding:"10px 12px", marginBottom:10, border:`1px solid ${T.border}` }}>
                       <div style={{ fontSize:12, color:T.textSub, fontWeight:700, marginBottom:8 }}>👥 租客聯絡資訊</div>
                       {room.tenantContactName&&<div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:(room.cohabitants||[]).length>0?8:0 }}>
@@ -1549,6 +1618,48 @@ function Rooms({ data, currentUser, onUpdate }) {
                     onUpdate={onUpdate}
                     onViewPhoto={setViewPhoto}
                   />
+
+                  {/* ── 押金退還按鈕區 ── */}
+                  {/* 管理員/後台：申請退還押金（押金狀態為空時顯示） */}
+                  {(isAdmin||isSA)&&!isFinance&&!room.depositRefundStatus&&(
+                    <button onClick={()=>onUpdate(d=>({...d,
+                      rooms:d.rooms.map(r=>r.id===room.id?{...r,depositRefundStatus:"pending",depositRefundRequestedBy:currentUser.id,depositRefundRequestedAt:nowISO()}:r),
+                      activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`【申請押金退還】「${room.communityName}」管理員申請退還押金，等待財務處理`,timestamp:nowISO()}]
+                    }))} style={{ ...S.btn("#7c3aed",true), width:"100%", justifyContent:"center", fontSize:13, marginBottom:8 }}>
+                      💰 申請退還押金
+                    </button>
+                  )}
+                  {/* 押金退還已申請 — 等待財務 */}
+                  {room.depositRefundStatus==="pending"&&!isFinance&&(
+                    <div style={{ background:"#faf5ff", border:"1px solid #7c3aed44", borderRadius:8, padding:"8px 12px", marginBottom:8, fontSize:13, color:"#7c3aed", display:"flex", alignItems:"center", gap:8 }}>
+                      <span>💰</span><span>押金退還申請中，等待財務確認…</span>
+                    </div>
+                  )}
+                  {/* 財務：確認退還押金 */}
+                  {isFinance&&room.depositRefundStatus==="pending"&&(
+                    <button onClick={()=>{
+                      const evictAt=new Date(Date.now()+2*24*60*60*1000).toISOString();
+                      onUpdate(d=>({...d,
+                        rooms:d.rooms.map(r=>r.id===room.id?{...r,depositRefundStatus:"refunded",depositRefundedBy:currentUser.id,depositRefundedAt:nowISO(),depositEvictionAt:evictAt}:r),
+                        activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`【押金退還】「${room.communityName}」已確認退還押金，兩日後自動退租`,timestamp:nowISO()}]
+                      }));
+                    }} style={{ ...S.btn("#7c3aed"), width:"100%", justifyContent:"center", fontSize:13, marginBottom:8 }}>
+                      ✅ 已退還押金
+                    </button>
+                  )}
+                  {/* 押金已退還：倒計時提醒橫幅 */}
+                  {isEvicting&&(()=>{
+                    const evictDate=room.depositEvictionAt?new Date(room.depositEvictionAt):null;
+                    const daysLeft=evictDate?Math.max(0,Math.ceil((evictDate-Date.now())/86400000)):null;
+                    return (
+                      <div style={{ background:"#faf5ff", border:"2px solid #7c3aed", borderRadius:9, padding:"12px 14px", marginBottom:10 }}>
+                        <div style={{ fontSize:14, fontWeight:800, color:"#7c3aed", marginBottom:4 }}>💰 押金已退回，此房源管理即將解散</div>
+                        <div style={{ fontSize:13, color:"#6d28d9", lineHeight:1.6 }}>
+                          兩日後將自動連動退出系統中的租客。{daysLeft!==null&&<strong>（剩約 {daysLeft} 天）</strong>}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   <div style={{ display:"flex", gap:8 }}>
                     <button onClick={()=>setOpenChat(room.id)} style={{ flex:1, ...S.btn(T.blue,true), justifyContent:"center", fontSize:13 }}>💬 {(room.messages||[]).length>0?`對話(${room.messages.length})`:"對話室"}</button>
@@ -1866,7 +1977,7 @@ function Rooms({ data, currentUser, onUpdate }) {
 // ═══════════════════════════════════════════════════════
 function Tenants({ data, currentUser, onUpdate }) {
   const { tenants, rooms } = data;
-  const isSA = currentUser.role==="superadmin";
+  const isSA = isSARole(currentUser.role);
   const [sel, setSel] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [editT, setEditT] = useState(null);
@@ -2178,7 +2289,7 @@ function UserManagement({ data, currentUser, onUpdate }) {
             <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:6 }}>
               <span style={S.tag(safeRole(u.role).color)}>{safeRole(u.role).label}</span>
               {u.id!==currentUser.id&&<>
-                <select value={u.role} onChange={e=>onUpdate(d=>({...d,users:d.users.map(x=>x.id===u.id?{...x,role:e.target.value}:x),activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`變更 ${u.name} 權限為 ${safeRole(e.target.value).label}`,timestamp:nowISO()}]}))} style={{ background:T.bg, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:6, padding:"3px 8px", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>{Object.entries(ROLES).filter(([k])=>k!=="system").map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select>
+                <select value={u.role} onChange={e=>onUpdate(d=>({...d,users:d.users.map(x=>x.id===u.id?{...x,role:e.target.value}:x),activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`變更 ${u.name} 權限為 ${safeRole(e.target.value).label}`,timestamp:nowISO()}]}))} style={{ background:T.bg, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:6, padding:"3px 8px", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>{Object.entries(ROLES).filter(([k])=>k!=="system"&&k!=="staff").map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select>
                 <button onClick={()=>setConfirmDel(u)} style={{ background:T.redBg, color:T.red, border:`1px solid ${T.red}33`, borderRadius:6, padding:"4px 10px", fontSize:13, fontWeight:600, cursor:"pointer", display:"flex", alignItems:"center", gap:4, fontFamily:"inherit" }}><Icon n="trash" s={12}/> 刪除</button>
               </>}
             </div>
@@ -2186,7 +2297,7 @@ function UserManagement({ data, currentUser, onUpdate }) {
         ))}
       </div>
       {confirmDel&&<Modal title="確認刪除使用者" onClose={()=>setConfirmDel(null)} width={360}><div style={{ textAlign:"center", padding:"8px 0 16px" }}><div style={{ width:52, height:52, borderRadius:"50%", background:T.redBg, border:`2px solid ${T.red}44`, display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 14px", color:T.red }}><Icon n="trash" s={22}/></div><div style={{ color:T.text, fontSize:15, fontWeight:700, marginBottom:8 }}>刪除「{confirmDel.name}」？</div><div style={{ color:T.textSub, fontSize:14, lineHeight:1.6, marginBottom:20 }}>此操作無法復原。</div><div style={{ display:"flex", gap:10 }}><button onClick={()=>setConfirmDel(null)} style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"10px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>取消</button><button onClick={()=>{onUpdate(d=>({...d,users:d.users.filter(x=>x.id!==confirmDel.id),activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`刪除使用者 ${confirmDel.name}`,timestamp:nowISO()}]}));setConfirmDel(null);}} style={{ flex:1, background:T.red, color:"#fff", border:"none", borderRadius:8, padding:"10px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>確認刪除</button></div></div></Modal>}
-      {showAdd&&<Modal title="新增人員" onClose={()=>setShowAdd(false)}>{[["name","姓名"],["email","Email"],["password","密碼"]].map(([k,l])=><div key={k}><label style={S.label}>{l}</label><input style={S.input} type={k==="password"?"password":"text"} value={form[k]} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))}/></div>)}<label style={S.label}>權限角色</label><select style={S.input} value={form.role} onChange={e=>setForm(f=>({...f,role:e.target.value}))}>{Object.entries(ROLES).filter(([k])=>k!=="system").map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select><button onClick={save} style={{ ...S.btn(), width:"100%", justifyContent:"center", padding:11 }}>確認新增</button></Modal>}
+      {showAdd&&<Modal title="新增人員" onClose={()=>setShowAdd(false)}>{[["name","姓名"],["email","Email"],["password","密碼"]].map(([k,l])=><div key={k}><label style={S.label}>{l}</label><input style={S.input} type={k==="password"?"password":"text"} value={form[k]} onChange={e=>setForm(f=>({...f,[k]:e.target.value}))}/></div>)}<label style={S.label}>權限角色</label><select style={S.input} value={form.role} onChange={e=>setForm(f=>({...f,role:e.target.value}))}>{Object.entries(ROLES).filter(([k])=>k!=="system"&&k!=="staff").map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select><button onClick={save} style={{ ...S.btn(), width:"100%", justifyContent:"center", padding:11 }}>確認新增</button></Modal>}
     </div>
   );
 }
@@ -2196,7 +2307,7 @@ function UserManagement({ data, currentUser, onUpdate }) {
 // ═══════════════════════════════════════════════════════
 function ActivityLog({ data, currentUser, onUpdate }) {
   const { activityLog, users } = data;
-  const isSA    = currentUser?.role === "superadmin";
+  const isSA    = isSARole(currentUser?.role);
   const isAdmin = currentUser?.role === "admin";
   const canExportLog = isSA || isAdmin; // 管理員以上都能匯出記錄
 
@@ -2508,6 +2619,42 @@ export default function RentKeeperApp() {
     };
   }, [user]); // eslint-disable-line
 
+  // ── 押金退還 → 到期自動退租（每次資料更新都檢查一次）────
+  useEffect(() => {
+    if (!data) return;
+    const now = Date.now();
+    const toEvict = (data.rooms||[]).filter(r =>
+      r.depositRefundStatus === "refunded" &&
+      r.depositEvictionAt &&
+      new Date(r.depositEvictionAt).getTime() <= now &&
+      !r.depositEvictionDone
+    );
+    if (!toEvict.length) return;
+    const evictIds = new Set(toEvict.map(r => r.id));
+    const removeIds = new Set();
+    toEvict.forEach(r => {
+      (data.tenants||[])
+        .filter(t => t.roomId === r.id || t.linkedRoom === r.id)
+        .forEach(t => {
+          const hasOther = (data.rooms||[]).some(rm =>
+            rm.id !== r.id && !evictIds.has(rm.id) &&
+            (rm.tenantId === t.id || t.roomId === rm.id || t.linkedRoom === rm.id)
+          );
+          if (!hasOther) removeIds.add(t.id);
+        });
+    });
+    const updRooms = (data.rooms||[]).map(r =>
+      evictIds.has(r.id)
+        ? { ...r, depositEvictionDone:true, status:"vacant", tenantId:null, tenantContactName:"", tenantContactPhone:"", cohabitants:[] }
+        : r
+    );
+    const updTenants = (data.tenants||[]).filter(t => !removeIds.has(t.id));
+    const logs = toEvict.map(r => ({ id:uid(), userId:"system", action:`【自動退租】「${r.communityName}」押金退還完畢，租客已連動退出系統`, timestamp:nowISO() }));
+    const next = { ...data, rooms:updRooms, tenants:updTenants, activityLog:[...(data.activityLog||[]), ...logs] };
+    setData(next);
+    (async()=>{ await saveData(next); })();
+  }, [(data?.rooms||[]).map(r=>r.id+r.depositEvictionDone+r.depositEvictionAt).join()]); // eslint-disable-line
+
   if (!data) return <div style={{ minHeight:"100vh", background:T.bgSub, display:"flex", alignItems:"center", justifyContent:"center", color:T.textSub, fontSize:14, fontFamily:"'Noto Sans TC',sans-serif" }}>載入中...</div>;
   if (!user)  return <LoginScreen users={data.users} tenants={data.tenants} onLogin={handleLogin}/>;
 
@@ -2515,7 +2662,7 @@ export default function RentKeeperApp() {
   const effectiveUser = viewAs ? { ...user, role: viewAs } : user;
   const effectiveRole = safeRole(effectiveUser.role);
   const isImpersonating = viewAs !== null;
-  const switchOptions = user.role === "superadmin"
+  const switchOptions = isSARole(user.role)
     ? [{ role:"admin",   label:"管理員視角",       color:T.blue },
        { role:"viewer",  label:"租客視角（唯讀）", color:T.textMuted }]
     : user.role === "admin"
