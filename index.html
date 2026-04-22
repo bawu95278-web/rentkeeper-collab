@@ -615,10 +615,10 @@ function LoginScreen({ users, tenants, onLogin }) {
           {/* 管理員 / 後台維修 / 財務行政：Email + 密碼 */}
           {(sel === "admin" || sel === "superadmin" || sel === "finance") && (
             <>
-              <label style={S.label}>帳號 Email</label>
-              <input style={S.input} type="email" value={email}
+              <label style={S.label}>帳號</label>
+              <input style={S.input} type="text" value={email}
                 onChange={e=>{ setEmail(e.target.value); setErr(""); setAutoFilled(false); }}
-                placeholder="your@email.com"
+                placeholder="Email / 手機號碼"
                 onKeyDown={e=>e.key==="Enter"&&canSubmit&&doLogin()} autoFocus/>
               <label style={S.label}>密碼</label>
               <input id="rk-pw-input" style={S.input} type="password" value={pw}
