@@ -1272,6 +1272,222 @@ function DefectPanel({ room, currentUser, onUpdate, onViewPhoto }) {
   );
 }
 
+// ── 動態載入外部腳本（jsPDF / html2canvas / SignaturePad）──
+const loadScript = (src) => new Promise((res) => {
+  if (document.querySelector(`script[src="${src}"]`)) { res(); return; }
+  const s = document.createElement("script");
+  s.src = src; s.onload = res; s.onerror = res; // 失敗也繼續
+  document.head.appendChild(s);
+});
+
+// ═══════════════════════════════════════════════════════
+//  CONTRACT MODAL
+// ═══════════════════════════════════════════════════════
+function ContractModal({ room, tenant, onClose }) {
+  const landlordRef = useRef(null);
+  const tenantRef   = useRef(null);
+  const padsRef     = useRef({ landlord:null, tenant:null });
+  const contractRef = useRef(null);
+  const [ready,       setReady]       = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [lHint, setLHint] = useState(true);
+  const [tHint, setTHint] = useState(true);
+
+  const fmtM = (n) => parseInt(n||0).toLocaleString();
+  const todayROC = toROC(new Date().toISOString().slice(0,10));
+  const dep = tenant?.deposit ? fmtM(tenant.deposit) : "___";
+
+  // ── 載入 CDN 腳本 ────────────────────────────────────
+  useEffect(() => {
+    Promise.all([
+      loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"),
+      loadScript("https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"),
+      loadScript("https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js"),
+    ]).then(() => setReady(true));
+  }, []);
+
+  // ── 初始化簽名板 ──────────────────────────────────────
+  useEffect(() => {
+    if (!ready || !window.SignaturePad) return;
+    [["landlord", landlordRef, setLHint], ["tenant", tenantRef, setTHint]].forEach(([k, ref, setHint]) => {
+      if (!ref.current) return;
+      ref.current.width  = ref.current.parentElement.offsetWidth || 300;
+      ref.current.height = 90;
+      const pad = new window.SignaturePad(ref.current, { penColor:"#111827", backgroundColor:"rgba(0,0,0,0)" });
+      pad.addEventListener("beginStroke", () => setHint(false));
+      padsRef.current[k] = pad;
+    });
+  }, [ready]);
+
+  const clearSig = (k) => {
+    padsRef.current[k]?.clear();
+    if (k==="landlord") setLHint(true); else setTHint(true);
+  };
+
+  // ── 下載 PDF ──────────────────────────────────────────
+  const downloadPDF = async () => {
+    if (!window.html2canvas || !window.jspdf) { alert("PDF 工具載入中，請稍候再試"); return; }
+    setDownloading(true);
+    try {
+      await new Promise(r => setTimeout(r, 150));
+      const el = contractRef.current;
+      const canvas = await window.html2canvas(el, { scale:2, useCORS:true, backgroundColor:"#ffffff", logging:false });
+      const { jsPDF } = window.jspdf;
+      const doc   = new jsPDF({ orientation:"portrait", unit:"mm", format:"a4" });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const imgW  = pageW - 20;
+      const sliceH = Math.floor(canvas.width * (pageH - 20) / imgW);
+      let srcY = 0, remaining = canvas.height, firstPage = true;
+      while (remaining > 0) {
+        const curr = Math.min(remaining, sliceH);
+        const c2 = document.createElement("canvas");
+        c2.width = canvas.width; c2.height = curr;
+        c2.getContext("2d").drawImage(canvas, 0, srcY, canvas.width, curr, 0, 0, canvas.width, curr);
+        const h = (curr / canvas.width) * imgW;
+        if (!firstPage) doc.addPage();
+        doc.addImage(c2.toDataURL("image/jpeg", 0.95), "JPEG", 10, 10, imgW, h);
+        remaining -= curr; srcY += curr; firstPage = false;
+      }
+      const name = room.tenantContactName || tenant?.name || "房客";
+      doc.save(`租賃契約書_${name}_${new Date().toISOString().slice(0,10)}.pdf`);
+    } catch(e) { alert("PDF 產生失敗：" + e.message); }
+    setDownloading(false);
+  };
+
+  // ── 合約區塊輔助元件 ──────────────────────────────────
+  const Sec = ({ title, children }) => (
+    <div style={{ marginBottom:14 }}>
+      <div style={{ fontSize:13, fontWeight:700, color:T.accent, borderLeft:`3px solid ${T.accent}`, paddingLeft:8, marginBottom:8 }}>{title}</div>
+      {children}
+    </div>
+  );
+  const Tbl = ({ rows }) => (
+    <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13, marginBottom:4 }}>
+      <tbody>
+        {rows.map(([k,v],i) => (
+          <tr key={i}>
+            <td style={{ padding:"6px 10px", border:`1px solid ${T.border}`, background:T.bgSub, fontWeight:600, width:"35%", color:T.textSub, fontSize:12 }}>{k}</td>
+            <td style={{ padding:"6px 10px", border:`1px solid ${T.border}`, color:T.text }}>{v||"—"}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+  const Para = ({ children }) => (
+    <div style={{ fontSize:13, lineHeight:2, color:"#374151" }}>{children}</div>
+  );
+
+  return (
+    <Modal title={`📄 合約預覽 — ${room.communityName}`} onClose={onClose} width={680}>
+      {/* ── 工具列 ── */}
+      <div style={{ display:"flex", gap:8, marginBottom:14, flexWrap:"wrap" }}>
+        <button onClick={downloadPDF} disabled={!ready||downloading}
+          style={{ ...S.btn(T.green), flex:1, justifyContent:"center", fontSize:13, opacity:(!ready||downloading)?0.6:1 }}>
+          {downloading ? "⏳ 產生中…" : "⬇️ 下載 PDF"}
+        </button>
+        <button onClick={()=>window.print()}
+          style={{ ...S.btn(T.textSub,true), flex:1, justifyContent:"center", fontSize:13 }}>
+          🖨️ 列印
+        </button>
+      </div>
+      {!ready && (
+        <div style={{ textAlign:"center", color:T.textMuted, fontSize:13, padding:"8px 0 14px" }}>
+          ⏳ 載入 PDF 工具中…
+        </div>
+      )}
+
+      {/* ── 合約本體（html2canvas 捕捉範圍）── */}
+      <div ref={contractRef} style={{ background:"#fff", padding:"24px 20px", border:`1px solid ${T.border}`, borderRadius:10, fontFamily:"'Noto Sans TC',sans-serif" }}>
+        {/* 標題 */}
+        <div style={{ textAlign:"center", fontSize:20, fontWeight:800, marginBottom:4, letterSpacing:"0.04em", color:"#111827" }}>房屋租賃契約書</div>
+        <div style={{ textAlign:"center", fontSize:12, color:"#6b7280", marginBottom:22 }}>立約日期：{todayROC}　　管理公司：家樂美房產管理顧問有限公司</div>
+
+        <Sec title="第一條　租賃標的">
+          <Tbl rows={[
+            ["房屋名稱／門牌", (room.address && room.address !== room.communityName) ? `${room.communityName}（${room.address}）` : room.communityName || "___"],
+            ["月租金",         `新臺幣 ${fmtM(room.rent)} 元整`],
+            ["押金",           `新臺幣 ${dep} 元整`],
+            ["每月繳租日",     `每月 ${room.rentDay||"5"} 日前繳清`],
+            ["屋主姓名",       room.ownerName || "___"],
+          ]}/>
+        </Sec>
+
+        <Sec title="第二條　租賃期間">
+          <Tbl rows={[
+            ["起租日期", toROC(room.leaseStart)],
+            ["到期日期", toROC(room.contractEnd)],
+          ]}/>
+          {(room.renewals||[]).length>0&&(
+            <div style={{ fontSize:12, color:T.textSub, marginTop:4 }}>
+              （已續約 {room.renewals.length} 次，最新到期：{toROC(room.renewals[room.renewals.length-1].renewEnd)}）
+            </div>
+          )}
+        </Sec>
+
+        <Sec title="第三條　承租人資料">
+          <Tbl rows={[
+            ["姓名",       room.tenantContactName || tenant?.name || "___"],
+            ["聯絡電話",   room.tenantContactPhone || tenant?.phone || "___"],
+            ["緊急聯絡人", tenant?.emergencyName ? `${tenant.emergencyName}${tenant.emergencyPhone?" / "+tenant.emergencyPhone:""}` : "___"],
+            ...(room.cohabitants||[]).map((c,i)=>[`同住人 ${i+1}`, `${c.name||"___"}${c.phone?" ／ "+c.phone:""}`]),
+          ]}/>
+        </Sec>
+
+        <Sec title="第四條　使用規定">
+          <Para>
+            一、承租人應依約定用途使用房屋，不得擅自改裝或破壞結構。<br/>
+            二、未經出租人同意，不得將房屋轉租、分租或借他人使用。<br/>
+            三、承租人應負責保持房屋及公共區域之整潔。
+          </Para>
+        </Sec>
+
+        <Sec title="第五條　修繕義務">
+          <Para>
+            一、房屋因自然損耗或設備故障，由出租人負責修繕。<br/>
+            二、因承租人使用不當造成之損毀，由承租人自行負責。<br/>
+            三、報修請通知管理公司，並於合理期限內完成修繕。
+          </Para>
+        </Sec>
+
+        <Sec title="第六條　違約處理">
+          <Para>
+            一、承租人無故提前終止契約，應賠償一個月租金作為違約金。<br/>
+            二、出租人無故提前終止契約，應退還雙倍押金予承租人。<br/>
+            三、租金逾期繳納超過 7 日，出租人得催告；逾期仍未繳清者，得終止契約。
+          </Para>
+        </Sec>
+
+        {/* ── 簽名區（html2canvas 會捕捉 canvas 內容）── */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginTop:20 }}>
+          {[
+            { label:"出租人（房東）簽名", key:"landlord", ref:landlordRef, hint:lHint },
+            { label:"承租人（房客）簽名", key:"tenant",   ref:tenantRef,   hint:tHint },
+          ].map(({ label, key, ref, hint }) => (
+            <div key={key}>
+              <div style={{ fontSize:12, fontWeight:700, color:T.textSub, marginBottom:6 }}>{label}</div>
+              <div style={{ position:"relative", border:`1.5px dashed ${T.border}`, borderRadius:8, background:"#fafafa", height:90, overflow:"hidden" }}>
+                <canvas ref={ref} style={{ width:"100%", height:"100%", display:"block" }}/>
+                {hint && (
+                  <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, color:T.textMuted, pointerEvents:"none" }}>
+                    請在此簽名
+                  </div>
+                )}
+              </div>
+              <button onClick={()=>clearSig(key)} style={{ marginTop:4, background:"none", border:"none", fontSize:11, color:T.textMuted, cursor:"pointer", padding:0, fontFamily:"inherit" }}>✕ 清除</button>
+              <div style={{ fontSize:11, color:T.textMuted, marginTop:2 }}>日期：{todayROC}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ fontSize:11, color:T.textMuted, textAlign:"center", marginTop:10, lineHeight:1.6 }}>
+        ※ 此為系統自動產出之合約草稿，簽名後下載 PDF 留存正本。
+      </div>
+    </Modal>
+  );
+}
+
 // ═══════════════════════════════════════════════════════
 //  ROOMS
 // ═══════════════════════════════════════════════════════
@@ -1325,6 +1541,7 @@ function Rooms({ data, currentUser, onUpdate }) {
   const [parkingRenewIds, setParkingRenewIds] = useState(new Set());
   const [confirmDel, setConfirmDel]   = useState(null);
   const [viewPhoto, setViewPhoto]     = useState(null);
+  const [contractRoom, setContractRoom] = useState(null);
   const [openChat, setOpenChat]       = useState(null);
   const [chatInput, setChatInput]     = useState({});
   const [editTpl, setEditTpl]         = useState(false);
@@ -1740,6 +1957,7 @@ function Rooms({ data, currentUser, onUpdate }) {
 
                   <div style={{ display:"flex", gap:8 }}>
                     <button onClick={()=>setOpenChat(room.id)} style={{ flex:1, ...S.btn(T.blue,true), justifyContent:"center", fontSize:13 }}>💬 {(room.messages||[]).length>0?`對話(${room.messages.length})`:"對話室"}</button>
+                    <button onClick={()=>setContractRoom(room)} style={{ ...S.btn(T.accent,true), fontSize:13, whiteSpace:"nowrap" }}>📄 合約</button>
                     {canEditRoom && <button onClick={()=>openEdit(room)} style={{ ...S.btn(T.textSub,true), fontSize:13 }}><Icon n="edit" s={13}/></button>}
                     {canDeleteRoom
                       ? <button onClick={()=>setConfirmDel(room)} style={{ ...S.btn(T.red,true), fontSize:13 }}><Icon n="trash" s={13}/></button>
@@ -1758,6 +1976,11 @@ function Rooms({ data, currentUser, onUpdate }) {
       </div>
 
       {viewPhoto && <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.7)", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }} onClick={()=>setViewPhoto(null)}><img src={viewPhoto} style={{ maxWidth:"90vw", maxHeight:"85vh", borderRadius:10, objectFit:"contain" }} alt="photo"/></div>}
+
+      {contractRoom && (() => {
+        const t = (data.tenants||[]).find(x => (x.linkedRoom===contractRoom.id||x.roomId===contractRoom.id) && !x.isCohabitant);
+        return <ContractModal room={contractRoom} tenant={t} onClose={()=>setContractRoom(null)}/>;
+      })()}
 
       {confirmDel && <Modal title="確認刪除房源" onClose={()=>setConfirmDel(null)} width={360}><div style={{ textAlign:"center", padding:"8px 0 16px" }}><div style={{ color:T.text, fontSize:15, fontWeight:700, marginBottom:8 }}>刪除「{confirmDel.communityName}」？</div><div style={{ color:T.textSub, fontSize:14, lineHeight:1.6, marginBottom:20 }}>此操作無法復原。</div><div style={{ display:"flex", gap:10 }}><button onClick={()=>setConfirmDel(null)} style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"10px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>取消</button><button onClick={()=>deleteRoom(confirmDel)} style={{ flex:1, background:T.red, color:"#fff", border:"none", borderRadius:8, padding:"10px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>確認刪除</button></div></div></Modal>}
 
@@ -2763,7 +2986,7 @@ export default function RentKeeperApp() {
 
   return (
     <div style={{ minHeight:"100vh", background:T.bgSub, fontFamily:"'Noto Sans TC','PingFang TC',sans-serif", color:T.text, fontSize:15 }}>
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} @keyframes warn-blink{0%,100%{background:#ea580c;box-shadow:0 0 0 rgba(234,88,12,0)}50%{background:#c2410c;box-shadow:0 0 12px rgba(234,88,12,0.7)}} *{box-sizing:border-box} select option{background:#fff;color:#111827}`}</style>
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} @keyframes warn-blink{0%,100%{background:#ea580c;box-shadow:0 0 0 rgba(234,88,12,0)}50%{background:#c2410c;box-shadow:0 0 12px rgba(234,88,12,0.7)}} *{box-sizing:border-box} select option{background:#fff;color:#111827} @media print{body>*:not(#print-contract){display:none!important} #print-contract{display:block!important;position:fixed;inset:0;background:#fff;padding:24px;z-index:99999}}`}</style>
 
       {/* Header */}
       <div style={{ background:T.bg, borderBottom:`1px solid ${T.border}`, padding:"10px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", position:"sticky", top:0, zIndex:200 }}>
