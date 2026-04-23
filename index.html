@@ -139,6 +139,20 @@ const downloadCSV = (filename, content) => {
   document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
 };
 
+// 開啟 LINE 分享對象選單（直接跳到「傳送給…」畫面，行動裝置使用 line:// 深層連結）
+// 必須在同步的 click handler 中第一個呼叫，否則行動瀏覽器會擋 popup
+const openLineShare = (text) => {
+  const encoded = encodeURIComponent(text);
+  const url = `https://line.me/R/msg/text/?${encoded}`;
+  const w = window.open(url, "_blank", "noopener,noreferrer");
+  if (!w || w.closed) {
+    // 被 popup blocker 擋下：改用當前分頁跳轉（行動裝置會觸發 LINE app）
+    try { window.location.href = url; } catch {}
+    return false;
+  }
+  return true;
+};
+
 // ═══════════════════════════════════════════════════════
 //  SECURITY — SHA-256, PASSWORD MIGRATION, LOCKOUT
 // ═══════════════════════════════════════════════════════
@@ -1595,7 +1609,8 @@ function Rooms({ data, currentUser, onUpdate }) {
     const amount      = totalUnpaid || room.rent || 0;
     const contactNote = room.lineNotifyToken?.trim() ? `（${room.lineNotifyToken.trim()}）` : "";
     const msg = `⚠️ 租金催繳通知${contactNote}\n\n房源：${room.communityName}${room.address?" ("+room.address+")":""}\n催繳月份：${monthList}\n應繳金額：NT$ ${Number(amount).toLocaleString()}\n繳租日：每月 ${room.rentDay||5} 號\n\n請您盡速完成匯款，謝謝您的配合。\n— 家樂美房產管理顧問有限公司`;
-    window.open("https://line.me/R/share?text="+encodeURIComponent(msg), "_blank");
+    // 優先：先同步開 LINE（保留 user gesture），再更新狀態
+    openLineShare(msg);
     setLineRemind(s=>({...s,[room.id]:"sent"}));
     onUpdate(d=>({...d, activityLog:[...d.activityLog,{ id:uid(), userId:currentUser.id, action:`LINE 催繳通知「${room.communityName}」→ 已開啟分享（${monthList}，NT$ ${Number(amount).toLocaleString()}）`, timestamp:nowISO() }]}));
     clearTimeout(lineRemindTimer.current[room.id]);
@@ -2102,7 +2117,7 @@ function Rooms({ data, currentUser, onUpdate }) {
                             }} style={{ ...S.btn(T.textSub,true), flex:1, justifyContent:"center", fontSize:12 }}>📋 複製報表</button>
                             <button onClick={()=>{
                               const text=generateElecReport(room);
-                              window.open("https://line.me/R/share?text="+encodeURIComponent(text),"_blank");
+                              openLineShare(text);
                             }} style={{ ...S.btn("#22c55e"), flex:1, justifyContent:"center", fontSize:12 }}>💚 分享到LINE</button>
                           </div>
                         )}
@@ -2747,7 +2762,7 @@ function Repairs({ data, currentUser, onUpdate }) {
     const rm = rooms.find(x=>x.id===rep.roomId);
     const note = getPanel(rep.id).note || rep.completionNote || "";
     const msg = `🔧 修繕完成通知\n\n房源：${rm?.communityName||""}${rm?.address?" ("+rm.address+")":""}\n報修項目：${rep.title}\n${note?"修繕說明："+note+"\n":""}完成日期：${toROC(todayStr())}\n\n如有問題請聯絡管理員，謝謝。\n— 家樂美房產管理顧問有限公司`;
-    window.open("https://line.me/R/share?text="+encodeURIComponent(msg), "_blank");
+    openLineShare(msg);
     setPanel(rep.id, { lineStatus:"ok" });
     onUpdate(d=>({ ...d, activityLog:[...d.activityLog,{ id:uid(), userId:currentUser.id, action:`LINE 通知「${rep.title}」修繕完成 → 已開啟分享`, timestamp:nowISO() }] }));
   };
