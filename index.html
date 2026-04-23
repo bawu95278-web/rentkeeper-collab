@@ -1864,12 +1864,29 @@ function Rooms({ data, currentUser, onUpdate }) {
     );
   }
 
+  const roomPriority = (r) => {
+    const rd = parseInt(r.rentDay||"5");
+    const unpaid = (bills||[]).filter(b=>b.roomId===r.id&&b.status==="unpaid").sort((a,b)=>a.month.localeCompare(b.month));
+    let overdueDays = 0;
+    if (r.status==="rented" && unpaid.length) {
+      const [yr,mo]=unpaid[0].month.split("-").map(Number);
+      overdueDays = Math.max(0,Math.floor((Date.now()-new Date(yr,mo-1,rd).getTime())/86400000));
+    }
+    if (overdueDays >= 3) return 5;
+    if (isRentDue(r)) return 4;
+    if (r.depositRefundStatus==="refunded" && !r.depositEvictionDone) return 3;
+    if (r.depositRefundStatus==="pending") return 2;
+    const dl = r.contractEnd?daysUntil(r.contractEnd):null;
+    if (dl!==null && dl<=60 && dl>0) return 1;
+    return 0;
+  };
+
   const visibleRooms = rooms.filter(r=>{
     if (isViewer) return r.id===viewerRoomId;
     if (isSA)     return true;
     if (isAdmin)  return !(r.assignedAdmins||[]).length || (r.assignedAdmins||[]).includes(currentUser.id);
     return true;
-  }).sort((a,b)=>(isRentDue(a)?0:1)-(isRentDue(b)?0:1));
+  }).sort((a,b)=> roomPriority(b) - roomPriority(a));
 
   return (
     <div>
@@ -1896,7 +1913,7 @@ function Rooms({ data, currentUser, onUpdate }) {
           const bc   = isEvicting?"#7c3aed":(isOverdue?"#ea580c":(due?T.red:(near?T.amber+"99":T.border)));
           const cardBg = isEvicting?"#faf5ff":(isOverdue?"#fff7ed":(due?T.redBg:(near?T.amberBg:T.bg)));
           return (
-            <div key={room.id} style={{ borderRadius:12, border:`${isEvicting||due||isOverdue?2:1}px solid ${bc}`, overflow:"hidden", background:cardBg }}>
+            <div key={room.id} style={{ borderRadius:12, border:`${isEvicting||due||isOverdue?2:1}px solid ${bc}`, overflow:"hidden", background:cardBg, animation: !open && (isOverdue||due||isEvicting||near||room.depositRefundStatus==="pending") ? "flash-alert-border 1.3s ease-in-out infinite" : "none" }}>
               <div onClick={()=>toggle(room.id)} style={{ display:"flex", alignItems:"center", gap:10, padding:"13px 16px", cursor:"pointer", background:cardBg, userSelect:"none" }}>
                 <div style={{ width:9, height:9, borderRadius:"50%", flexShrink:0, background:isOverdue?"#ea580c":(due?T.red:(room.status==="rented"?T.green:T.amber)), animation:isOverdue?"pulse 1s infinite":"none" }}/>
                 <div style={{ flex:1, minWidth:0 }}>
@@ -3652,7 +3669,7 @@ function RentKeeperApp() {
 
   return (
     <div style={{ minHeight:"100vh", background:T.bgSub, fontFamily:"'Noto Sans TC','PingFang TC',sans-serif", color:T.text, fontSize:15 }}>
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} @keyframes warn-blink{0%,100%{background:#ea580c;box-shadow:0 0 0 rgba(234,88,12,0)}50%{background:#c2410c;box-shadow:0 0 12px rgba(234,88,12,0.7)}} *{box-sizing:border-box} select option{background:#fff;color:#111827} @media print{body>*:not(#print-contract){display:none!important} #print-contract{display:block!important;position:fixed;inset:0;background:#fff;padding:24px;z-index:99999}}`}</style>
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} @keyframes flash-alert-border{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}50%{box-shadow:0 0 0 4px rgba(239,68,68,0.55)}} @keyframes warn-blink{0%,100%{background:#ea580c;box-shadow:0 0 0 rgba(234,88,12,0)}50%{background:#c2410c;box-shadow:0 0 12px rgba(234,88,12,0.7)}} *{box-sizing:border-box} select option{background:#fff;color:#111827} @media print{body>*:not(#print-contract){display:none!important} #print-contract{display:block!important;position:fixed;inset:0;background:#fff;padding:24px;z-index:99999}}`}</style>
 
       {/* Header */}
       <div style={{ background:T.bg, borderBottom:`1px solid ${T.border}`, padding:"10px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", position:"sticky", top:0, zIndex:200 }}>
