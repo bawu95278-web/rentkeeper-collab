@@ -325,23 +325,23 @@ function AvatarBadge({ user, size=34 }) {
 }
 
 function ROCDateInput({ value, onChange }) {
-  const sel = { flex:1, background:T.bg, border:`1px solid ${T.borderMd}`, borderRadius:8, color:T.text, padding:"10px 4px", fontSize:14, outline:"none", cursor:"pointer", fontFamily:"inherit" };
   const parts = value ? value.split("-") : ["","",""];
   const rocYear = parts[0] ? String(parseInt(parts[0])-1911) : "";
   const month   = parts[1]||"";
   const day     = parts[2]||"";
+  const sel = (filled) => ({ flex:1, background:filled?"#fff":"#f3f4f6", border:`1px solid ${T.borderMd}`, borderRadius:8, color:T.text, padding:"10px 4px", fontSize:14, outline:"none", cursor:"pointer", fontFamily:"inherit" });
   const emit = (y,m,d) => { if(y&&m&&d) onChange({ target:{ value:`${parseInt(y)+1911}-${m}-${d}` } }); };
   return (
     <div style={{ display:"flex", gap:4, marginBottom:12 }}>
-      <select value={rocYear} onChange={e=>emit(e.target.value,month,day)} style={sel}>
+      <select value={rocYear} onChange={e=>emit(e.target.value,month,day)} style={sel(!!rocYear)}>
         <option value="">民國年</option>
         {Array.from({length:36},(_,i)=>95+i).map(y=><option key={y} value={y}>民國 {y} 年</option>)}
       </select>
-      <select value={month} onChange={e=>emit(rocYear,e.target.value,day)} style={sel}>
+      <select value={month} onChange={e=>emit(rocYear,e.target.value,day)} style={sel(!!month)}>
         <option value="">月</option>
         {Array.from({length:12},(_,i)=>String(i+1).padStart(2,"0")).map(m=><option key={m} value={m}>{parseInt(m)} 月</option>)}
       </select>
-      <select value={day} onChange={e=>emit(rocYear,month,e.target.value)} style={sel}>
+      <select value={day} onChange={e=>emit(rocYear,month,e.target.value)} style={sel(!!day)}>
         <option value="">日</option>
         {Array.from({length:31},(_,i)=>String(i+1).padStart(2,"0")).map(d=><option key={d} value={d}>{parseInt(d)} 日</option>)}
       </select>
@@ -1904,6 +1904,8 @@ function Rooms({ data, currentUser, onUpdate }) {
     return true;
   }).sort((a,b)=> roomPriority(b) - roomPriority(a));
 
+  const fs = (v) => (v !== undefined && v !== null && String(v).trim() !== "") ? { background:"#fff" } : { background:"#f3f4f6" };
+
   return (
     <div>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
@@ -2317,7 +2319,7 @@ function Rooms({ data, currentUser, onUpdate }) {
             </div>
           </div>
           {/* 社區名稱 */}
-          <div><label style={S.label}>社區名稱 *</label><input style={S.input} value={form.communityName} onChange={sf("communityName")}/></div>
+          <div><label style={S.label}>社區名稱 *</label><input style={{...S.input,...fs(form.communityName)}} value={form.communityName} onChange={sf("communityName")}/></div>
 
           {/* 房型選擇 */}
           <label style={S.label}>房型</label>
@@ -2396,14 +2398,14 @@ function Rooms({ data, currentUser, onUpdate }) {
           )}
 
           {/* 其餘基本欄位 */}
-          {[["ownerName","屋主名字"],["salesRep","開發業務"],["address","地址"]].map(([k,l])=><div key={k}><label style={S.label}>{l}</label><input style={S.input} value={form[k]} onChange={sf(k)}/></div>)}
+          {[["ownerName","屋主名字"],["salesRep","開發業務"],["address","地址"]].map(([k,l])=><div key={k}><label style={S.label}>{l}</label><input style={{...S.input,...fs(form[k])}} value={form[k]} onChange={sf(k)}/></div>)}
           <label style={S.label}>繳租日期</label>
-          <select style={S.input} value={form.rentDay} onChange={sf("rentDay")}>{Array.from({length:31},(_,i)=>i+1).map(d=><option key={d} value={d}>{d} 號</option>)}</select>
+          <select style={{...S.input,...fs(form.rentDay)}} value={form.rentDay} onChange={sf("rentDay")}>{Array.from({length:31},(_,i)=>i+1).map(d=><option key={d} value={d}>{d} 號</option>)}</select>
           <div onClick={()=>setForm(f=>({...f,autoRentRemind:!f.autoRentRemind}))} style={{ display:"flex", alignItems:"center", gap:10, background:form.autoRentRemind?T.accentBg:T.bgSub, border:`1px solid ${form.autoRentRemind?T.accent:T.border}`, borderRadius:8, padding:"10px 14px", marginBottom:12, cursor:"pointer", userSelect:"none" }}>
             <div style={{ width:20, height:20, borderRadius:5, border:`2px solid ${form.autoRentRemind?T.accent:T.borderMd}`, background:form.autoRentRemind?T.accent:T.bg, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>{form.autoRentRemind&&<span style={{ color:"#fff", fontSize:13 }}>✓</span>}</div>
             <div><div style={{ fontSize:14, fontWeight:600, color:form.autoRentRemind?T.accent:T.text }}>自動提醒繳租</div><div style={{ fontSize:12, color:T.textSub, marginTop:1 }}>每月繳租日自動發送提醒訊息</div></div>
           </div>
-          <label style={S.label}>月租金 *</label><input style={S.input} type="text" value={form.rent} onChange={sf("rent")}/>
+          <label style={S.label}>月租金 *</label><input style={{...S.input,...fs(form.rent)}} type="text" value={form.rent} onChange={sf("rent")}/>
           <label style={S.label}>起租日</label>
           <ROCDateInput value={form.leaseStart} onChange={e=>setForm(f=>({...f,leaseStart:e.target.value,contractEnd:addOneYear(e.target.value)}))}/>
           <label style={S.label}>租約到期日</label>
@@ -2446,16 +2448,16 @@ function Rooms({ data, currentUser, onUpdate }) {
                   </div>
                   {open&&<div style={{ padding:"12px 13px", background:T.bg, borderTop:`1px solid ${T.border}` }}>
                     <label style={S.label}>車位編號 <span style={{ fontWeight:400, color:T.textMuted }}>（例如 B1-132號）</span></label>
-                    <input style={S.input} value={spot.spotNo} placeholder="B1-132" onChange={e=>updateSpot(spot.id,{spotNo:e.target.value})}/>
+                    <input style={{...S.input,...fs(spot.spotNo)}} value={spot.spotNo} placeholder="B1-132" onChange={e=>updateSpot(spot.id,{spotNo:e.target.value})}/>
                     {(isSA||isAdmin)&&<>
                       <label style={S.label}>車位歸屬房源</label>
-                      <select style={{ ...S.input, marginBottom:10 }} value={spot.linkedRoomId} onChange={e=>updateSpot(spot.id,{linkedRoomId:e.target.value})}>
+                      <select style={{ ...S.input, marginBottom:10, ...fs(spot.linkedRoomId) }} value={spot.linkedRoomId} onChange={e=>updateSpot(spot.id,{linkedRoomId:e.target.value})}>
                         <option value="">— 請選擇房源（可留空）—</option>
                         {(data.rooms||[]).map(r=><option key={r.id} value={r.id}>{r.communityName}{r.address?` (${r.address})`:""}</option>)}
                       </select>
                     </>}
                     <label style={S.label}>車位租金（元/月）</label>
-                    <input style={S.input} type="text" inputMode="decimal" value={spot.rent} placeholder="0" onChange={e=>updateSpot(spot.id,{rent:e.target.value})}/>
+                    <input style={{...S.input,...fs(spot.rent)}} type="text" inputMode="decimal" value={spot.rent} placeholder="0" onChange={e=>updateSpot(spot.id,{rent:e.target.value})}/>
                     <label style={S.label}>起租日</label>
                     <ROCDateInput value={spot.leaseStart} onChange={e=>updateSpot(spot.id,{leaseStart:e.target.value,contractEnd:addOneYear(e.target.value)})}/>
                     <label style={S.label}>到期日</label>
@@ -2507,11 +2509,11 @@ function Rooms({ data, currentUser, onUpdate }) {
           })()}
 
           <div style={{ fontSize:12, color:T.blue, fontWeight:700, marginBottom:10, letterSpacing:"0.06em" }}>租客聯絡</div>
-          {[["tenantContactName","主租客姓名"],["tenantContactPhone","主租客電話"]].map(([k,l])=><div key={k}><label style={S.label}>{l}</label><input style={S.input} value={form[k]} onChange={sf(k)}/></div>)}
+          {[["tenantContactName","主租客姓名"],["tenantContactPhone","主租客電話"]].map(([k,l])=><div key={k}><label style={S.label}>{l}</label><input style={{...S.input,...fs(form[k])}} value={form[k]} onChange={sf(k)}/></div>)}
           {(form.cohabitants||[]).map((c,i)=><div key={i} style={{ background:T.bgSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"10px 12px", marginBottom:8 }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}><span style={{ fontSize:12, color:T.textSub, fontWeight:700 }}>同住人 {i+1}</span><button onClick={()=>setForm(f=>({...f,cohabitants:f.cohabitants.filter((_,j)=>j!==i)}))} style={{ background:T.redBg, color:T.red, border:"none", borderRadius:5, padding:"3px 9px", fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>刪除</button></div>
-            <label style={S.label}>姓名</label><input style={S.input} value={c.name} placeholder="同住人姓名" onChange={e=>setForm(f=>({...f,cohabitants:f.cohabitants.map((x,j)=>j===i?{...x,name:e.target.value}:x)}))}/>
-            <label style={S.label}>電話</label><input style={{ ...S.input, marginBottom:0 }} value={c.phone} placeholder="同住人電話" onChange={e=>setForm(f=>({...f,cohabitants:f.cohabitants.map((x,j)=>j===i?{...x,phone:e.target.value}:x)}))}/>
+            <label style={S.label}>姓名</label><input style={{...S.input,...fs(c.name)}} value={c.name} placeholder="同住人姓名" onChange={e=>setForm(f=>({...f,cohabitants:f.cohabitants.map((x,j)=>j===i?{...x,name:e.target.value}:x)}))}/>
+            <label style={S.label}>電話</label><input style={{ ...S.input, marginBottom:0, ...fs(c.phone) }} value={c.phone} placeholder="同住人電話" onChange={e=>setForm(f=>({...f,cohabitants:f.cohabitants.map((x,j)=>j===i?{...x,phone:e.target.value}:x)}))}/>
           </div>)}
           <button onClick={()=>setForm(f=>({...f,cohabitants:[...(f.cohabitants||[]),{name:"",phone:""}]}))} style={{ ...S.btn(T.textSub,true), width:"100%", justifyContent:"center", marginBottom:12 }}><Icon n="plus" s={13}/> 新增同住人</button>
           {/* LINE 分享 */}
@@ -2524,7 +2526,7 @@ function Rooms({ data, currentUser, onUpdate }) {
               待繳租時，點「📲 LINE 催繳」按鈕後會自動開啟 LINE，<br/>自行選擇要傳送給哪位租客即可。
             </div>
             <label style={{ ...S.label, color:"#15803d", marginBottom:4 }}>LINE 聯絡備注（選填）</label>
-            <input style={{ ...S.input, marginBottom:0 }} value={form.lineNotifyToken||""} onChange={sf("lineNotifyToken")} placeholder="例如：租客 LINE 暱稱、群組名稱（僅供備注）"/>
+            <input style={{ ...S.input, marginBottom:0, ...fs(form.lineNotifyToken) }} value={form.lineNotifyToken||""} onChange={sf("lineNotifyToken")} placeholder="例如：租客 LINE 暱稱、群組名稱（僅供備注）"/>
           </div>
 
           {/* 照片區 */}
