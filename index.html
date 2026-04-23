@@ -877,11 +877,18 @@ function Dashboard({ data, currentUser, onUpdate }) {
                     const month=new Date().toISOString().slice(0,7);
                     const ten=(tenants||[]).find(x=>(x.linkedRoom===r.id||x.roomId===r.id)&&!x.isCohabitant);
                     onUpdate(d=>{
-                      const ex=d.bills.find(b=>b.roomId===r.id&&b.month===month);
-                      const nb=ex
-                        ?d.bills.map(b=>b.id===ex.id?{...b,status:"paid",paidDate:todayStr(),recordedBy:currentUser.id}:b)
-                        :[...d.bills,{id:uid(),tenantId:ten?.id||r.tenantId||"",roomId:r.id,type:"rent",amount:r.rent,month,status:"paid",paidDate:todayStr(),recordedBy:currentUser.id}];
-                      return{...d,bills:nb,activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`標記「${r.communityName}」${month} 月租金已繳（催收處理）`,timestamp:nowISO()}]};
+                      const unpaidMonths=(d.bills||[]).filter(b=>b.roomId===r.id&&b.status==="unpaid").map(b=>b.month);
+                      let nb=(d.bills||[]).map(b=>
+                        b.roomId===r.id && b.status==="unpaid"
+                          ? { ...b, status:"paid", paidDate:todayStr(), recordedBy:currentUser.id }
+                          : b
+                      );
+                      if (!nb.some(b=>b.roomId===r.id&&b.month===month)) {
+                        nb=[...nb,{id:uid(),tenantId:ten?.id||r.tenantId||"",roomId:r.id,type:"rent",amount:r.rent,month,status:"paid",paidDate:todayStr(),recordedBy:currentUser.id}];
+                        unpaidMonths.push(month);
+                      }
+                      const monthsLabel=unpaidMonths.length?unpaidMonths.sort().join("、"):month;
+                      return{...d,bills:nb,activityLog:[...d.activityLog,{id:uid(),userId:currentUser.id,action:`標記「${r.communityName}」${monthsLabel} 租金已繳（催收處理，警示解除）`,timestamp:nowISO()}]};
                     });
                   }} style={{ flexShrink:0, background:"#ea580c", color:"#fff", border:"none", borderRadius:8, padding:"7px 12px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit", whiteSpace:"nowrap" }}>
                     ✓ 已收款
