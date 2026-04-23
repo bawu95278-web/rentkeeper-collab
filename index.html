@@ -142,15 +142,42 @@ const downloadCSV = (filename, content) => {
 // 開啟 LINE 分享對象選單（直接跳到「傳送給…」畫面，行動裝置使用 line:// 深層連結）
 // 必須在同步的 click handler 中第一個呼叫，否則行動瀏覽器會擋 popup
 const openLineShare = (text) => {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(() => {});
+    } else {
+      const ta = document.createElement("textarea");
+      ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); } catch {}
+      document.body.removeChild(ta);
+    }
+  } catch {}
+
   const encoded = encodeURIComponent(text);
   const url = `https://line.me/R/msg/text/?${encoded}`;
-  const w = window.open(url, "_blank", "noopener,noreferrer");
-  if (!w || w.closed) {
-    // 被 popup blocker 擋下：改用當前分頁跳轉（行動裝置會觸發 LINE app）
-    try { window.location.href = url; } catch {}
-    return false;
+  let opened = false;
+  try {
+    const w = window.open(url, "_blank", "noopener,noreferrer");
+    opened = !!(w && !w.closed);
+  } catch {}
+
+  if (!opened) {
+    try { window.location.href = url; opened = true; } catch {}
   }
-  return true;
+
+  if (!opened) {
+    alert("無法自動開啟 LINE（可能為預覽環境或瀏覽器限制）。\n催繳文字已複製到剪貼簿，請手動開啟 LINE 後貼上傳送。");
+  } else {
+    try {
+      const toast = document.createElement("div");
+      toast.textContent = "✓ 已複製催繳文字至剪貼簿（備用）";
+      toast.style.cssText = "position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#059669;color:#fff;padding:10px 18px;border-radius:8px;font-size:14px;font-weight:600;z-index:99999;box-shadow:0 4px 12px rgba(0,0,0,.2)";
+      document.body.appendChild(toast);
+      setTimeout(() => toast.remove(), 2500);
+    } catch {}
+  }
+  return opened;
 };
 
 // ═══════════════════════════════════════════════════════
