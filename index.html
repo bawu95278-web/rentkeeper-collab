@@ -32,7 +32,7 @@ const storage = window.storage;
 //  ROLES
 // ═══════════════════════════════════════════════════════
 const ROLES = {
-  superadmin: { label: "後台維修",  color: "#dc2626", badge: "★", canEdit: true, canDelete: true, canManageUsers: true, canViewFinance: true, pages: ["dashboard","rooms","tenants","bills","repairs","report","users","log"] },
+  superadmin: { label: "後台管理員",  color: "#dc2626", badge: "★", canEdit: true, canDelete: true, canManageUsers: true, canViewFinance: true, pages: ["dashboard","rooms","tenants","bills","repairs","report","users","log"] },
   finance:    { label: "財務/行政", color: "#7c3aed", badge: "◆", canEdit: true, canDelete: true, canManageUsers: true, canViewFinance: true, pages: ["dashboard","rooms","tenants","bills","repairs","report","users","log"] },
   admin:      { label: "管理員",    color: "#2563eb", badge: "▲", canEdit: true, canDelete: false, canManageUsers: false, canViewFinance: true, pages: ["dashboard","rooms","tenants","bills","repairs","report","users","log"] },
   staff:      { label: "工作人員",  color: "#d97706", badge: "●", canEdit: true, canDelete: false, canManageUsers: false, canViewFinance: false, pages: ["tenants","repairs"] },
@@ -50,9 +50,9 @@ const DEFAULT_DATA = {
   users: [
     { id: "u2", name: "林小雯", email: "staff@rentkeeper.tw", password: "10176e7b7b24d317acfcf8d2064cfd2f24e154f7b5a96603077d5ef813d6a6b6", role: "admin", avatar: "林", online: false },
     { id: "u3", name: "陳建志", email: "view@rentkeeper.tw",  password: "656d604dfdba41a262963cce53699bbc56cd7a2c0da1ad5ead45fc49214159d6", role: "viewer", avatar: "陳", online: false },
-    { id: "u4", name: "憲哥",   email: "okdnhaco@gmail.com",  password: "c6b3e728ce8a6c10e7e9f8eefbd42f0c9ee7d7c2097d0979aeeefdf38a9556af", role: "superadmin", avatar: "憲", online: false },
+    { id: "u4", name: "管理員",   email: "okdnhaco@gmail.com",  password: "c6b3e728ce8a6c10e7e9f8eefbd42f0c9ee7d7c2097d0979aeeefdf38a9556af", role: "superadmin", avatar: "管", online: false },
     { id: "u5", name: "婉婷",   email: "0986311933",           password: "fd9762b82a6c016dd662cf07fbd6d7deecb56caf9908e375c3dcbb043ebbebba", role: "admin",      avatar: "婉", online: false },
-    { id: "u6", name: "管理員", email: "okdnhaco@gmail.com",  password: "fd9762b82a6c016dd662cf07fbd6d7deecb56caf9908e375c3dcbb043ebbebba", role: "admin", avatar: "管", online: false },
+    { id: "u6", name: "憲哥", email: "okdnhaco@gmail.com",  password: "fd9762b82a6c016dd662cf07fbd6d7deecb56caf9908e375c3dcbb043ebbebba", role: "admin", avatar: "憲", online: false },
     { id: "u7", name: "林意婷", email: "0921987265",           password: "55c12b2e9148678008527e3cbb79e8b7c9f3227d552c5fd53de581e8f566bd0d", role: "admin",   avatar: "林", online: false },
     { id: "u8", name: "財管人員", email: "0986311933",         password: "fd9762b82a6c016dd662cf07fbd6d7deecb56caf9908e375c3dcbb043ebbebba", role: "finance", avatar: "財", online: false },
   ],
@@ -373,10 +373,10 @@ function LoginScreen({ users, tenants, onLogin }) {
   const rolesMeta = [
     { key:"tenant",     label:"租客",     icon:"person", color:"#6b7280", bg:"#f3f4f6" },
     { key:"admin",      label:"管理員",   icon:"shield", color:"#2563eb", bg:"#eff6ff" },
-    { key:"superadmin", label:"後台維修", icon:"build",  color:"#dc2626", bg:"#fef2f2" },
+    { key:"superadmin", label:"後台管理員", icon:"build",  color:"#dc2626", bg:"#fef2f2" },
     { key:"finance",    label:"財務/行政",icon:"dollar", color:"#7c3aed", bg:"#faf5ff" },
   ];
-  const roleLabel = { tenant:"租客", admin:"管理員", superadmin:"後台維修", finance:"財務/行政" };
+  const roleLabel = { tenant:"租客", admin:"管理員", superadmin:"後台管理員", finance:"財務/行政" };
   const roleColor = { tenant:"#6b7280", admin:"#2563eb", superadmin:"#dc2626", finance:"#7c3aed" };
 
   // ── 初始化：從 localStorage 載入上次的記住我憑證 ────────
@@ -3513,6 +3513,13 @@ function RentKeeperApp() {
         const existingIds = new Set((d.users||[]).map(u => u.id));
         const missingUsers = DEFAULT_DATA.users.filter(u => !existingIds.has(u.id));
         if (missingUsers.length) d = { ...d, users: [...d.users, ...missingUsers] };
+        if (!d._nameSwapV1) {
+          d = { ...d, users: (d.users||[]).map(u => {
+            if (u.id === "u4" && u.name === "憲哥")   return { ...u, name:"管理員", avatar:"管" };
+            if (u.id === "u6" && u.name === "管理員") return { ...u, name:"憲哥", avatar:"憲" };
+            return u;
+          }), _nameSwapV1: true };
+        }
         await saveData(d);
         // 啟動時自動複製一份到次要備份鍵（救援用）
         if ((d.rooms||[]).length > 0) { try { await saveBaseline(d); } catch {} }
