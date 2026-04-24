@@ -1033,38 +1033,47 @@ function PaymentRecords({ room, currentUser, isViewer, onUpdate, onViewPhoto }) 
   });
 
   const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
     setUploading(true);
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const newRecord = {
-        id:          uid(),
-        month:       selectedMonth,
-        image:       ev.target.result,
-        note:        noteInput.trim(),
-        uploadedBy:  currentUser.id,
-        uploaderName:currentUser.name,
-        uploadedAt:  nowISO(),
+    let done = 0;
+    const newRecords = [];
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        newRecords.push({
+          id:          uid(),
+          month:       selectedMonth,
+          image:       ev.target.result,
+          fileName:    file.name,
+          fileType:    file.type,
+          note:        noteInput.trim(),
+          uploadedBy:  currentUser.id,
+          uploaderName:currentUser.name,
+          uploadedAt:  nowISO(),
+        });
+        done++;
+        if (done === files.length) {
+          onUpdate(d => ({
+            ...d,
+            rooms: d.rooms.map(r => r.id === room.id
+              ? { ...r, paymentRecords: [...(r.paymentRecords || []), ...newRecords] }
+              : r),
+            activityLog: [...d.activityLog, {
+              id: uid(), userId: currentUser.id,
+              action: `上傳「${room.communityName}」${toROCMonth(selectedMonth)} 匯款截圖 ${files.length} 張`,
+              timestamp: nowISO(),
+            }],
+          }));
+          setUploading(false);
+          setShowUpload(false);
+          setNoteInput("");
+        }
       };
-      onUpdate(d => ({
-        ...d,
-        rooms: d.rooms.map(r => r.id === room.id
-          ? { ...r, paymentRecords: [...(r.paymentRecords || []), newRecord] }
-          : r),
-        activityLog: [...d.activityLog, {
-          id: uid(), userId: currentUser.id,
-          action: `上傳「${room.communityName}」${toROCMonth(selectedMonth)} 匯款截圖`,
-          timestamp: nowISO(),
-        }],
-      }));
-      setUploading(false);
-      setShowUpload(false);
-      setNoteInput("");
-      e.target.value = "";
-    };
-    reader.onerror = () => setUploading(false);
-    reader.readAsDataURL(file);
+      reader.onerror = () => { done++; if (done === files.length) setUploading(false); };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = "";
   };
 
   const deleteRecord = (recId) => {
@@ -1132,22 +1141,20 @@ function PaymentRecords({ room, currentUser, isViewer, onUpdate, onViewPhoto }) 
             onChange={e => setNoteInput(e.target.value)}
             placeholder="例：4月租金 NT$16,000"
           />
-          <input
-            ref={uploadRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            style={{ display: "none" }}
-            onChange={handleFileChange}
-          />
-          <button
-            onClick={() => uploadRef.current?.click()}
-            disabled={uploading}
-            style={{ width: "100%", background: T.accent, color: "#fff", border: "none", borderRadius: 8, padding: "10px", fontSize: 14, fontWeight: 700, cursor: uploading ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: uploading ? 0.6 : 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
-            {uploading
-              ? <><div style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid #fff4", borderTopColor: "#fff", animation: "spin 0.7s linear infinite" }}/> 上傳中...</>
-              : "📷 選擇截圖上傳"}
-          </button>
+          <input id="pay-cam" type="file" accept="image/*" capture="environment" multiple style={{ display: "none" }} onChange={handleFileChange}/>
+          <input id="pay-pic" type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleFileChange}/>
+          <input id="pay-file" type="file" accept="image/*,application/pdf,*/*" multiple style={{ display: "none" }} onChange={handleFileChange}/>
+          {uploading ? (
+            <div style={{ width: "100%", background: T.accent, color: "#fff", borderRadius: 8, padding: "10px", fontSize: 14, fontWeight: 700, textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+              <div style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid #fff4", borderTopColor: "#fff", animation: "spin 0.7s linear infinite" }}/> 上傳中...
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 6 }}>
+              <label htmlFor="pay-cam" style={{ flex: 1, background: T.accent, color: "#fff", borderRadius: 8, padding: "10px", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "center" }}>📷 拍照</label>
+              <label htmlFor="pay-pic" style={{ flex: 1, background: "#10b981", color: "#fff", borderRadius: 8, padding: "10px", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "center" }}>🖼 相簿</label>
+              <label htmlFor="pay-file" style={{ flex: 1, background: "#6366f1", color: "#fff", borderRadius: 8, padding: "10px", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "center" }}>📎 檔案</label>
+            </div>
+          )}
         </div>
       )}
 
@@ -1298,7 +1305,7 @@ function DefectPanel({ room, currentUser, onUpdate, onViewPhoto }) {
       {showForm&&(
         <div style={{ background:T.accentBg, border:`1px solid ${T.accent}33`, borderRadius:8, padding:"12px", marginBottom:8 }}>
           <div style={{ fontSize:12, fontWeight:700, color:T.accent, marginBottom:8 }}>{editItem?"✏️ 編輯瑕疵":"➕ 新增瑕疵"}</div>
-          <input ref={defPhotoRef} type="file" accept="image/*" onChange={e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>setForm(fm=>({...fm,photo:ev.target.result})); r.readAsDataURL(f); }} style={{ display:"none" }}/>
+          <input ref={defPhotoRef} type="file" accept="image/*,*/*" onChange={e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>setForm(fm=>({...fm,photo:ev.target.result})); r.readAsDataURL(f); }} style={{ display:"none" }}/>
           <button onClick={()=>defPhotoRef.current?.click()} style={{ ...S.btn(T.textSub,true), width:"100%", justifyContent:"center", marginBottom:8, fontSize:12 }}>
             {form.photo?"✅ 已上傳照片（點擊更換）":"📷 上傳照片（選填）"}
           </button>
@@ -2533,7 +2540,7 @@ function Rooms({ data, currentUser, onUpdate }) {
           <div style={{ fontSize:12, color:T.blue, fontWeight:700, marginBottom:10, marginTop:4, letterSpacing:"0.06em" }}>照片</div>
           <div style={{ marginBottom:10 }}>
             <label style={S.label}>租約電子檔 <span style={{ fontWeight:400, color:T.textMuted }}>（所有人可讀取下載，可多張）</span></label>
-            <input ref={fileRef} type="file" accept="image/*" multiple onChange={handleContractUpload} style={{ display:"none" }}/>
+            <input ref={fileRef} type="file" accept="image/*,application/pdf,*/*" multiple onChange={handleContractUpload} style={{ display:"none" }}/>
             <button onClick={()=>fileRef.current?.click()} style={{ ...S.btn(T.textSub,true), width:"100%", justifyContent:"center", marginBottom:8 }}>
               📄 上傳租約（可多張）
             </button>
@@ -2552,7 +2559,7 @@ function Rooms({ data, currentUser, onUpdate }) {
           {/* 屋主匯款帳號：所有人可讀取下載，管理員以上可上傳修改 */}
           <div style={{ marginBottom:10 }}>
             <label style={S.label}>屋主匯款帳號 <span style={{ fontWeight:400, color:T.textMuted }}>（所有人可讀取下載）</span></label>
-            <input ref={bankRef} type="file" accept="image/*" onChange={e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>setForm(fm=>({...fm,ownerBankPhoto:ev.target.result})); r.readAsDataURL(f); }} style={{ display:"none" }}/>
+            <input ref={bankRef} type="file" accept="image/*,application/pdf,*/*" onChange={e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>setForm(fm=>({...fm,ownerBankPhoto:ev.target.result})); r.readAsDataURL(f); }} style={{ display:"none" }}/>
             <button onClick={()=>bankRef.current?.click()} style={{ ...S.btn(T.textSub,true), width:"100%", justifyContent:"center" }}>
               {form.ownerBankPhoto ? "✅ 已上傳（點擊更換）" : "選擇照片"}
             </button>
@@ -2561,7 +2568,7 @@ function Rooms({ data, currentUser, onUpdate }) {
           {/* 出租點交室內照片：所有人可讀取下載，管理員以上可上傳修改 */}
           <div style={{ marginBottom:10 }}>
             <label style={S.label}>出租點交室內照片 <span style={{ fontWeight:400, color:T.textMuted }}>（所有人可讀取下載，可多張）</span></label>
-            <input ref={inspectionRef} type="file" accept="image/*" multiple onChange={handleInspectionUpload} style={{ display:"none" }}/>
+            <input ref={inspectionRef} type="file" accept="image/*,application/pdf,*/*" multiple onChange={handleInspectionUpload} style={{ display:"none" }}/>
             <button onClick={()=>inspectionRef.current?.click()} style={{ ...S.btn(T.textSub,true), width:"100%", justifyContent:"center", marginBottom:8 }}>
               📷 上傳照片（可多張）
             </button>
@@ -2763,10 +2770,18 @@ function Bills({ data, currentUser, onUpdate }) {
                 </div>
               </div>
               <div style={{ marginTop:10, borderTop:`1px solid ${T.border}`, paddingTop:10 }}>
-                {b.paymentProof?<div style={{ display:"flex", alignItems:"center", gap:8 }}><button onClick={()=>setViewProof(b.paymentProof)} style={{ background:T.greenBg, color:T.green, border:`1px solid ${T.green}44`, borderRadius:7, padding:"5px 12px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>📷 查看截圖</button>{isTenant&&<button onClick={()=>{if(proofRefs.current[b.id])proofRefs.current[b.id].click();}} style={{ background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:7, padding:"5px 10px", fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>重新上傳</button>}</div>
-                  :isTenant?<button onClick={()=>{if(proofRefs.current[b.id])proofRefs.current[b.id].click();}} style={{ background:T.accentBg, color:T.accent, border:`1px solid ${T.accent}44`, borderRadius:7, padding:"6px 14px", fontSize:13, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", gap:6, fontFamily:"inherit" }}>📷 租金截圖上傳</button>
-                  :<div style={{ fontSize:12, color:T.textMuted }}>尚未上傳截圖</div>}
-                {isTenant&&<input ref={el=>proofRefs.current[b.id]=el} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={e=>{ if(!e.target.files[0])return; const rd=new FileReader(); rd.onload=ev=>onUpdate(d=>({...d,bills:d.bills.map(x=>x.id===b.id?{...x,paymentProof:ev.target.result}:x)})); rd.readAsDataURL(e.target.files[0]); }}/>}
+                {b.paymentProof?<div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}><button onClick={()=>setViewProof(b.paymentProof)} style={{ background:T.greenBg, color:T.green, border:`1px solid ${T.green}44`, borderRadius:7, padding:"5px 12px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>📷 查看截圖</button></div>:null}
+                {isTenant&&<div style={{ display:"flex", gap:6, marginTop:b.paymentProof?8:0, flexWrap:"wrap" }}>
+                  <label htmlFor={`proof-cam-${b.id}`} style={{ background:T.accentBg, color:T.accent, border:`1px solid ${T.accent}44`, borderRadius:7, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>📷 拍照</label>
+                  <label htmlFor={`proof-pic-${b.id}`} style={{ background:"#d1fae5", color:"#065f46", border:"1px solid #6ee7b755", borderRadius:7, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>🖼 相簿</label>
+                  <label htmlFor={`proof-file-${b.id}`} style={{ background:"#e0e7ff", color:"#4338ca", border:"1px solid #a5b4fc55", borderRadius:7, padding:"6px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>📎 檔案</label>
+                </div>}
+                {!isTenant && !b.paymentProof && <div style={{ fontSize:12, color:T.textMuted }}>尚未上傳截圖</div>}
+                {isTenant&&<>
+                  <input id={`proof-cam-${b.id}`} type="file" accept="image/*" capture="environment" multiple style={{ display:"none" }} onChange={e=>{ const fs=Array.from(e.target.files||[]); if(!fs.length)return; fs.forEach(f=>{const rd=new FileReader(); rd.onload=ev=>onUpdate(d=>({...d,bills:d.bills.map(x=>x.id===b.id?{...x,paymentProof:ev.target.result,paymentProofs:[...(x.paymentProofs||[]),{id:uid(),dataUrl:ev.target.result,fileName:f.name,uploadedAt:nowISO()}]}:x)})); rd.readAsDataURL(f);}); e.target.value=""; }}/>
+                  <input id={`proof-pic-${b.id}`} type="file" accept="image/*" multiple style={{ display:"none" }} onChange={e=>{ const fs=Array.from(e.target.files||[]); if(!fs.length)return; fs.forEach(f=>{const rd=new FileReader(); rd.onload=ev=>onUpdate(d=>({...d,bills:d.bills.map(x=>x.id===b.id?{...x,paymentProof:ev.target.result,paymentProofs:[...(x.paymentProofs||[]),{id:uid(),dataUrl:ev.target.result,fileName:f.name,uploadedAt:nowISO()}]}:x)})); rd.readAsDataURL(f);}); e.target.value=""; }}/>
+                  <input id={`proof-file-${b.id}`} type="file" accept="image/*,application/pdf,*/*" multiple style={{ display:"none" }} onChange={e=>{ const fs=Array.from(e.target.files||[]); if(!fs.length)return; fs.forEach(f=>{const rd=new FileReader(); rd.onload=ev=>onUpdate(d=>({...d,bills:d.bills.map(x=>x.id===b.id?{...x,paymentProof:ev.target.result,paymentProofs:[...(x.paymentProofs||[]),{id:uid(),dataUrl:ev.target.result,fileName:f.name,uploadedAt:nowISO()}]}:x)})); rd.readAsDataURL(f);}); e.target.value=""; }}/>
+                </>}
               </div>
             </div>
           );
@@ -2904,7 +2919,7 @@ function Repairs({ data, currentUser, onUpdate }) {
                     onChange={e=>setPanel(rep.id,{note:e.target.value})}/>
 
                   <label style={S.label}>修繕後照片（可多張）</label>
-                  <input id={`rep-photo-${rep.id}`} type="file" accept="image/*" multiple
+                  <input id={`rep-photo-${rep.id}`} type="file" accept="image/*,application/pdf,*/*" multiple
                     style={{ position:"absolute", width:1, height:1, opacity:0, pointerEvents:"none" }}
                     onChange={e=>{
                       const files = Array.from(e.target.files||[]);
@@ -2964,7 +2979,7 @@ function Repairs({ data, currentUser, onUpdate }) {
         <label style={S.label}>問題描述</label><textarea style={{ ...S.input, height:80, resize:"vertical" }} value={form.desc} onChange={e=>setForm(f=>({...f,desc:e.target.value}))} placeholder="請描述問題狀況..."/>
         <label style={S.label}>現場照片（選填）</label>
         <label htmlFor="repair-new-photo" style={{ display:"block", border:`2px dashed ${T.borderMd}`, borderRadius:10, padding:"16px", textAlign:"center", cursor:"pointer", marginBottom:12, background:T.bgSub }}><div style={{ fontSize:22, marginBottom:4 }}>📷</div><div style={{ fontSize:13, color:T.textSub }}>點擊選擇圖片</div></label>
-        <input id="repair-new-photo" ref={photoRef} type="file" accept="image/*" multiple style={{ display:"none" }} onChange={e=>{ Array.from(e.target.files).forEach(file=>{ const r=new FileReader(); r.onload=ev=>setForm(prev=>({...prev,photos:[...(prev.photos||[]),ev.target.result]})); r.readAsDataURL(file); }); e.target.value=""; }}/>
+        <input id="repair-new-photo" ref={photoRef} type="file" accept="image/*,application/pdf,*/*" multiple style={{ display:"none" }} onChange={e=>{ Array.from(e.target.files).forEach(file=>{ const r=new FileReader(); r.onload=ev=>setForm(prev=>({...prev,photos:[...(prev.photos||[]),ev.target.result]})); r.readAsDataURL(file); }); e.target.value=""; }}/>
         {(form.photos||[]).length>0&&<div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:14 }}>{form.photos.map((src,i)=><div key={i} style={{ position:"relative", width:70, height:70, borderRadius:8, overflow:"hidden", border:`1px solid ${T.border}`, flexShrink:0 }}><img src={src} alt={`圖${i+1}`} style={{ width:"100%", height:"100%", objectFit:"cover" }}/><button onClick={()=>setForm(f=>({...f,photos:f.photos.filter((_,j)=>j!==i)}))} style={{ position:"absolute", top:2, right:2, background:"rgba(0,0,0,0.55)", color:"#fff", border:"none", borderRadius:"50%", width:18, height:18, fontSize:12, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", padding:0, fontFamily:"inherit" }}>✕</button></div>)}</div>}
         {!isTenant&&<><label style={S.label}>優先級</label><select style={S.input} value={form.priority} onChange={e=>setForm(f=>({...f,priority:e.target.value}))}><option value="high">高（緊急）</option><option value="low">低（一般）</option></select></>}
         <button onClick={addRepair} disabled={!form.title||!form.roomId} style={{ ...S.btn(), width:"100%", justifyContent:"center", padding:12, opacity:(!form.title||!form.roomId)?0.5:1 }}>送出報修申請</button>
@@ -3696,7 +3711,7 @@ function RentKeeperApp() {
     <div style={{ minHeight:"100vh", background:T.bgSub, fontFamily:"'Noto Sans TC','PingFang TC',sans-serif", color:T.text, fontSize:15 }}>
       <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}} @keyframes flash-alert-border{0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}50%{box-shadow:0 0 0 4px rgba(239,68,68,0.55)}} @keyframes warn-blink{0%,100%{background:#ea580c;box-shadow:0 0 0 rgba(234,88,12,0)}50%{background:#c2410c;box-shadow:0 0 12px rgba(234,88,12,0.7)}} *{box-sizing:border-box} select option{background:#fff;color:#111827} @media print{body>*:not(#print-contract){display:none!important} #print-contract{display:block!important;position:fixed;inset:0;background:#fff;padding:24px;z-index:99999}}`}</style>
 
-      {/* Header */}
+      {/* Header（上方橫幅：公司名稱 + 通知鈴鐺 + 登出） */}
       <div style={{ background:T.bg, borderBottom:`1px solid ${T.border}`, padding:"10px 16px", display:"flex", justifyContent:"space-between", alignItems:"center", position:"sticky", top:0, zIndex:200 }}>
         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
           <div style={{ width:30, height:30, background:`linear-gradient(135deg,${T.accent},#3b82f6)`, borderRadius:8, display:"flex", alignItems:"center", justifyContent:"center", color:"#fff" }}><Icon n="home" s={15}/></div>
@@ -3704,45 +3719,10 @@ function RentKeeperApp() {
           {syncing&&<div style={{ width:6, height:6, borderRadius:"50%", background:T.amber, animation:"pulse 1s infinite" }}/>}
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-          <div style={{ display:"flex" }}>{(data.users||[]).filter(u=>u.online).map(u=><AvatarBadge key={u.id} user={u} size={26}/>)}</div>
           <button onClick={()=>{setShowNotif(v=>!v);setNotifications(n=>n.map(x=>({...x,read:true})));}} style={{ background:"none", border:"none", cursor:"pointer", color:T.textSub, padding:4, position:"relative" }}>
             <Icon n="bell" s={20}/>
             {notifications.some(n=>!n.read)&&<div style={{ position:"absolute", top:2, right:2, width:8, height:8, background:T.red, borderRadius:"50%", border:`2px solid ${T.bg}`, animation:"pulse 1.5s infinite" }}/>}
           </button>
-          <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-            <AvatarBadge user={{...user,online:true}} size={28}/>
-            <div style={{ display:"flex", flexDirection:"column", lineHeight:1.2 }}>
-              <span style={{ fontSize:12, fontWeight:700, color:T.text }}>{user.name}</span>
-              <span style={{ fontSize:10, fontWeight:600, color:role.color }}>{role.label}</span>
-            </div>
-          </div>
-          {/* 身份切換按鈕 */}
-          {(switchOptions.length > 0 || isImpersonating) && (
-            <div style={{ position:"relative" }}>
-              <button onClick={()=>setShowViewAsPicker(v=>!v)}
-                style={{ background:isImpersonating?T.amberBg:T.bgMuted, color:isImpersonating?T.amber:T.textSub, border:`1px solid ${isImpersonating?T.amber+"55":T.border}`, borderRadius:7, padding:"4px 9px", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", gap:4 }}>
-                <Icon n="users" s={13}/>
-                {isImpersonating ? safeRole(viewAs).label : "切換視角"}
-              </button>
-              {showViewAsPicker && (
-                <div style={{ position:"absolute", top:"calc(100% + 6px)", right:0, background:T.bg, border:`1px solid ${T.border}`, borderRadius:12, boxShadow:"0 8px 24px rgba(0,0,0,0.13)", zIndex:500, minWidth:168, overflow:"hidden" }}>
-                  {isImpersonating && (
-                    <button onClick={()=>{ setViewAs(null); setShowViewAsPicker(false); setTab("dashboard"); }}
-                      style={{ width:"100%", display:"flex", alignItems:"center", gap:8, padding:"11px 14px", background:"none", border:"none", borderBottom:`1px solid ${T.border}`, cursor:"pointer", fontSize:13, fontWeight:700, color:safeRole(user.role).color, fontFamily:"inherit" }}>
-                      ↩ 返回{safeRole(user.role).label}
-                    </button>
-                  )}
-                  {switchOptions.filter(o=>o.role!==viewAs).map(o=>(
-                    <button key={o.role} onClick={()=>{ setViewAs(o.role); setShowViewAsPicker(false); setTab(o.role==="viewer"?"rooms":"dashboard"); }}
-                      style={{ width:"100%", display:"flex", alignItems:"center", gap:8, padding:"11px 14px", background:"none", border:"none", cursor:"pointer", fontSize:13, color:o.color, fontFamily:"inherit" }}>
-                      👁 {o.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          {role.canManageUsers&&<button onClick={()=>setShowReset(true)} style={{ background:"none", border:"none", cursor:"pointer", color:T.textSub, padding:4 }}><Icon n="refresh" s={17}/></button>}
           <button onClick={handleLogout} style={{ background:"none", border:"none", cursor:"pointer", color:T.textSub, padding:4 }}><Icon n="logout" s={18}/></button>
         </div>
       </div>
