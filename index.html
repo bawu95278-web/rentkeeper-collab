@@ -115,6 +115,71 @@ async function saveBaseline(d) {
 }
 
 // ═══════════════════════════════════════════════════════
+//  GITHUB CLOUD SYNC（私有 repo 當資料庫；token 由使用者貼入，不寫死於程式碼）
+// ═══════════════════════════════════════════════════════
+const GH_TOKEN_KEY = "rentkeeper-gh-token";
+const GH_OWNER     = "bawu95278-web";
+const GH_REPO      = "rentkeeper-data";
+const GH_FILE      = "data.json";
+let _ghSha = null;
+
+const getGhToken = () => { try { return localStorage.getItem(GH_TOKEN_KEY) || ""; } catch { return ""; } };
+const setGhToken = (t) => { try { t ? localStorage.setItem(GH_TOKEN_KEY, t) : localStorage.removeItem(GH_TOKEN_KEY); } catch {} };
+const hasGhToken = () => !!getGhToken();
+
+async function cloudLoad() {
+  const token = getGhToken();
+  if (!token) return { ok:false, reason:"no_token" };
+  try {
+    const res = await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_FILE}?t=${Date.now()}`, {
+      headers: { Authorization:`Bearer ${token}`, Accept:"application/vnd.github+json" },
+      cache: "no-store",
+    });
+    if (res.status === 404) { _ghSha = null; return { ok:true, data:null }; }
+    if (res.status === 401 || res.status === 403) return { ok:false, reason:"auth" };
+    if (!res.ok) return { ok:false, reason:`http_${res.status}` };
+    const j = await res.json();
+    _ghSha = j.sha;
+    const text = decodeURIComponent(escape(atob((j.content || "").replace(/\n/g,""))));
+    return { ok:true, data: JSON.parse(text) };
+  } catch {
+    return { ok:false, reason:"network" };
+  }
+}
+
+async function cloudSave(data) {
+  const token = getGhToken();
+  if (!token) return { ok:false, reason:"no_token" };
+  const content = btoa(unescape(encodeURIComponent(JSON.stringify(data))));
+  const body = {
+    message: `update ${new Date().toISOString().slice(0,19)}`,
+    content,
+    ...(_ghSha ? { sha: _ghSha } : {}),
+  };
+  const url = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_FILE}`;
+  const headers = { Authorization:`Bearer ${token}`, Accept:"application/vnd.github+json", "Content-Type":"application/json" };
+  try {
+    let res = await fetch(url, { method:"PUT", headers, body: JSON.stringify(body) });
+    if (res.status === 409 || res.status === 422) {
+      const head = await fetch(`${url}?t=${Date.now()}`, { headers, cache:"no-store" });
+      if (head.ok) {
+        const hj = await head.json();
+        _ghSha = hj.sha;
+        body.sha = _ghSha;
+        res = await fetch(url, { method:"PUT", headers, body: JSON.stringify(body) });
+      }
+    }
+    if (res.status === 401 || res.status === 403) return { ok:false, reason:"auth" };
+    if (!res.ok) return { ok:false, reason:`http_${res.status}` };
+    const j = await res.json();
+    _ghSha = j.content.sha;
+    return { ok:true };
+  } catch {
+    return { ok:false, reason:"network" };
+  }
+}
+
+// ═══════════════════════════════════════════════════════
 //  UTILS
 // ═══════════════════════════════════════════════════════
 const fmt       = (n) => `NT$ ${Number(n || 0).toLocaleString()}`;
@@ -3621,6 +3686,10 @@ function RentKeeperApp() {
   const [showReset, setShowReset] = useState(false);
   const [viewAs, setViewAs]           = useState(null); // null | "admin" | "viewer"
   const [showViewAsPicker, setShowViewAsPicker] = useState(false);
+  const [cloudStatus, setCloudStatus] = useState(hasGhToken() ? "loading" : "unset");
+  const [showCloudCfg, setShowCloudCfg] = useState(false);
+  const [cloudTokenInput, setCloudTokenInput] = useState("");
+  const cloudSaveTimer = useRef(null);
   const mounted      = useRef(true);
   const lastActivity = useRef(Date.now());
 
@@ -3648,7 +3717,6 @@ function RentKeeperApp() {
         // 啟動時自動複製一份到次要備份鍵（救援用）
         if ((d.rooms||[]).length > 0) { try { await saveBaseline(d); } catch {} }
       } else {
-        // 主資料不存在時，嘗試從次要備份還原
         const fallback = await loadBaseline();
         if (fallback && (fallback.rooms||[]).length > 0) {
           d = fallback;
@@ -3658,6 +3726,22 @@ function RentKeeperApp() {
           await saveData(d);
         }
       }
+
+      if (hasGhToken()) {
+        const r = await cloudLoad();
+        if (r.ok) {
+          if (r.data && (r.data.rooms||[]).length > 0) {
+            d = r.data;
+            await saveData(d);
+          } else if (d && (d.rooms||[]).length > 0) {
+            await cloudSave(d);
+          }
+          if (mounted.current) setCloudStatus("synced");
+        } else if (mounted.current) {
+          setCloudStatus(r.reason === "auth" ? "error" : "offline");
+        }
+      }
+
       setData(d);
     })();
   }, []);
@@ -3671,8 +3755,17 @@ function RentKeeperApp() {
   const updateData = useCallback((fn) => {
     setData(prev => {
       const next = fn(prev);
-      if (!next) return prev; // 防守 fn 回傳 null/undefined
+      if (!next) return prev;
       (async () => { await saveData(next); if (mounted.current) { setSyncing(false); showToast("已儲存"); } })();
+      if (hasGhToken()) {
+        if (cloudSaveTimer.current) clearTimeout(cloudSaveTimer.current);
+        if (mounted.current) setCloudStatus("syncing");
+        cloudSaveTimer.current = setTimeout(async () => {
+          const r = await cloudSave(next);
+          if (!mounted.current) return;
+          setCloudStatus(r.ok ? "synced" : (r.reason === "auth" ? "error" : "offline"));
+        }, 1500);
+      }
       return next;
     });
     setSyncing(true);
@@ -3817,6 +3910,25 @@ function RentKeeperApp() {
           {syncing&&<div style={{ width:6, height:6, borderRadius:"50%", background:T.amber, animation:"pulse 1s infinite" }}/>}
         </div>
         <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+          {(() => {
+            const cs = cloudStatus;
+            const map = {
+              unset:   { ico:"🔒", txt:"未設定", c:"#9ca3af", t:"點擊設定 GitHub 雲端同步" },
+              loading: { ico:"⏳", txt:"連線中", c:"#0ea5e9", t:"正在從雲端拉取資料…" },
+              synced:  { ico:"☁",  txt:"已同步", c:"#16a34a", t:"雲端同步正常" },
+              syncing: { ico:"⏳", txt:"同步中", c:"#f59e0b", t:"正在推送資料到雲端…" },
+              error:   { ico:"⚠",  txt:"驗證失敗", c:"#dc2626", t:"Token 失效或權限不足，請重新設定" },
+              offline: { ico:"⚠",  txt:"離線",   c:"#f97316", t:"網路或 GitHub API 暫時無法存取" },
+            };
+            const s = map[cs] || map.unset;
+            return (
+              <button onClick={()=>{ setCloudTokenInput(getGhToken()); setShowCloudCfg(true); }}
+                title={s.t}
+                style={{ background:"none", border:`1px solid ${s.c}55`, borderRadius:14, padding:"3px 9px", cursor:"pointer", color:s.c, fontSize:11, fontWeight:700, display:"flex", alignItems:"center", gap:4, fontFamily:"inherit" }}>
+                <span style={{ fontSize:12 }}>{s.ico}</span>{s.txt}
+              </button>
+            );
+          })()}
           <button onClick={()=>{setShowNotif(v=>!v);setNotifications(n=>n.map(x=>({...x,read:true})));}} style={{ background:"none", border:"none", cursor:"pointer", color:T.textSub, padding:4, position:"relative" }}>
             <Icon n="bell" s={20}/>
             {notifications.some(n=>!n.read)&&<div style={{ position:"absolute", top:2, right:2, width:8, height:8, background:T.red, borderRadius:"50%", border:`2px solid ${T.bg}`, animation:"pulse 1.5s infinite" }}/>}
@@ -3824,6 +3936,60 @@ function RentKeeperApp() {
           <button onClick={handleLogout} style={{ background:"none", border:"none", cursor:"pointer", color:T.textSub, padding:4 }}><Icon n="logout" s={18}/></button>
         </div>
       </div>
+
+      {showCloudCfg && (
+        <Modal title="☁ GitHub 雲端同步設定" onClose={()=>setShowCloudCfg(false)} width={460}>
+          <div style={{ padding:"4px 0 8px" }}>
+            <div style={{ background:T.bgSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"10px 12px", marginBottom:14, fontSize:12, color:T.textSub, lineHeight:1.7 }}>
+              使用 GitHub 私有 repo <strong style={{ color:T.text }}>{GH_OWNER}/{GH_REPO}</strong> 作為雲端資料庫。<br/>
+              所有裝置貼入相同 token 即可<strong style={{ color:T.accent }}>跨裝置同步</strong>。
+            </div>
+            <label style={S.label}>Personal Access Token（github_pat_... 開頭）</label>
+            <input type="password" value={cloudTokenInput} onChange={e=>setCloudTokenInput(e.target.value)}
+              placeholder="貼上你的 GitHub fine-grained token"
+              style={{ ...S.input, fontFamily:"monospace", fontSize:12 }}/>
+            <div style={{ fontSize:11, color:T.textMuted, marginTop:-6, marginBottom:14, lineHeight:1.6 }}>
+              · Token 只儲存於本機 localStorage，不會上傳<br/>
+              · 需要對 <strong>{GH_REPO}</strong> 有 Contents: Read and write 權限<br/>
+              · 申請：<a href="https://github.com/settings/personal-access-tokens" target="_blank" rel="noopener noreferrer" style={{ color:T.accent }}>github.com/settings/personal-access-tokens</a>
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              {hasGhToken() && (
+                <button onClick={async()=>{
+                  setGhToken(""); setCloudTokenInput(""); setCloudStatus("unset"); _ghSha=null;
+                  showToast("已移除 token");
+                }} style={{ flex:1, background:T.redBg, color:T.red, border:`1px solid ${T.red}33`, borderRadius:8, padding:"10px", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>
+                  移除
+                </button>
+              )}
+              <button onClick={async()=>{
+                if (!cloudTokenInput.trim()) { showToast("請貼入 token","err"); return; }
+                setGhToken(cloudTokenInput.trim());
+                setCloudStatus("loading");
+                const r = await cloudLoad();
+                if (!r.ok) {
+                  setCloudStatus(r.reason === "auth" ? "error" : "offline");
+                  showToast(r.reason === "auth" ? "Token 無效或無權限" : "連線失敗", "err");
+                  return;
+                }
+                if (r.data && (r.data.rooms||[]).length > 0) {
+                  setData(r.data);
+                  await saveData(r.data);
+                  showToast(`已從雲端拉取 ${r.data.rooms.length} 筆房源`);
+                } else {
+                  const push = await cloudSave(data);
+                  if (push.ok) showToast("已將本地資料推送到雲端");
+                  else { setCloudStatus("offline"); showToast("推送失敗","err"); return; }
+                }
+                setCloudStatus("synced");
+                setShowCloudCfg(false);
+              }} style={{ flex:2, background:T.green, color:"#fff", border:"none", borderRadius:8, padding:"10px", fontSize:13, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
+                💾 儲存並連線
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* Notification Panel */}
       {showNotif&&<div style={{ position:"fixed", top:52, right:0, width:"min(320px,100vw)", maxHeight:"60vh", background:T.bg, border:`1px solid ${T.border}`, borderRadius:"0 0 0 14px", zIndex:300, overflow:"hidden", display:"flex", flexDirection:"column", boxShadow:"0 8px 24px rgba(0,0,0,0.1)" }}>
