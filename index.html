@@ -668,18 +668,16 @@ function LoginScreen({ users, tenants, onLogin }) {
 
           {/* 管理員 / 後台維修 / 財務行政：Email + 密碼 */}
           {(sel === "admin" || sel === "superadmin" || sel === "finance") && (
-            <>
+            <form id="rk-login-form" onSubmit={e=>{ e.preventDefault(); if(canSubmit&&!loading) doLogin(); }}>
               <label style={S.label}>帳號</label>
-              <input style={S.input} type="text" value={email}
+              <input style={S.input} type="text" name="username" autoComplete="username" value={email}
                 onChange={e=>{ setEmail(e.target.value); setErr(""); setAutoFilled(false); }}
-                placeholder="Email / 手機號碼"
-                onKeyDown={e=>e.key==="Enter"&&canSubmit&&doLogin()} autoFocus/>
+                placeholder="Email / 手機號碼" autoFocus/>
               <label style={S.label}>密碼</label>
-              <input id="rk-pw-input" style={S.input} type="password" value={pw}
+              <input id="rk-pw-input" style={S.input} type="password" name="password" autoComplete="current-password" value={pw}
                 onChange={e=>{ setPw(e.target.value); setErr(""); setAutoFilled(false); }}
-                placeholder="••••••••"
-                onKeyDown={e=>e.key==="Enter"&&canSubmit&&doLogin()}/>
-            </>
+                placeholder="••••••••"/>
+            </form>
           )}
 
           {/* 記住我 checkbox — 選完身份後才顯示 */}
@@ -715,7 +713,7 @@ function LoginScreen({ users, tenants, onLogin }) {
 
           {/* 登入按鈕 */}
           {sel && (
-            <button onClick={()=>doLogin()} disabled={loading||!canSubmit}
+            <button type={(sel==="admin"||sel==="superadmin"||sel==="finance")?"submit":"button"} form={(sel==="admin"||sel==="superadmin"||sel==="finance")?"rk-login-form":undefined} onClick={(sel==="admin"||sel==="superadmin"||sel==="finance")?undefined:(()=>doLogin())} disabled={loading||!canSubmit}
               style={{ ...S.btn(), width:"100%", justifyContent:"center", padding:"12px", fontSize:15, opacity:(loading||!canSubmit)?0.55:1, marginBottom:0, borderRadius:10, background:loading?T.bgMuted:T.accent }}>
               {loading
                 ? <><div style={{ width:16, height:16, borderRadius:"50%", border:"2px solid #fff4", borderTopColor:"#fff", animation:"spin 0.7s linear infinite" }}/>&nbsp;登入中...</>
@@ -2768,11 +2766,7 @@ function Tenants({ data, currentUser, onUpdate }) {
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
                   {[["入住日",toROC(t.moveIn)],["合約到期",toROC(t.contractEnd)],["押金",t.deposit?fmt(t.deposit):"—"],["剩餘天數",days!==null?`${days} 天`:"—"]].map(([k,v])=><div key={k} style={{ background:T.bgSub, borderRadius:7, padding:"8px 10px", border:`1px solid ${T.border}` }}><div style={{ fontSize:11, color:T.textMuted, fontWeight:600, marginBottom:2 }}>{k}</div><div style={{ fontSize:14, fontWeight:600, color:T.text }}>{v}</div></div>)}
                 </div>
-                <div style={{ display:"flex", gap:8, marginBottom:isSA?10:0 }}>
-                  {t.phone&&<a href={`tel:${t.phone}`} style={{ flex:1, background:T.greenBg, color:T.green, border:`1px solid ${T.green}44`, borderRadius:8, padding:"9px", fontSize:13, fontWeight:600, textDecoration:"none", textAlign:"center" }}>📞 撥打電話</a>}
-                  {t.email&&<a href={`mailto:${t.email}`} style={{ flex:1, background:T.accentBg, color:T.accent, border:`1px solid ${T.accent}44`, borderRadius:8, padding:"9px", fontSize:13, fontWeight:600, textDecoration:"none", textAlign:"center" }}>✉️ 寄信</a>}
-                </div>
-                {isSA&&<div style={{ display:"flex", gap:8, paddingTop:10, borderTop:`1px solid ${T.border}` }}>
+                {isSA&&<div style={{ display:"flex", gap:8 }}>
                   <button onClick={()=>{setForm({...EMPTY,...t,deposit:String(t.deposit||"")});setEditT(t);setShowForm(true);}} style={{ flex:1, ...S.btn(T.textSub,true), justifyContent:"center", fontSize:13 }}><Icon n="edit" s={13}/> 編輯</button>
                   <button onClick={()=>setConfirmDel(t)} style={{ flex:1, ...S.btn(T.red,true), justifyContent:"center", fontSize:13 }}><Icon n="trash" s={13}/> 刪除</button>
                 </div>}
