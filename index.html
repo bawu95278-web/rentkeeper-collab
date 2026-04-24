@@ -1363,10 +1363,14 @@ function ContractModal({ room, tenant, onClose }) {
   const tenantRef   = useRef(null);
   const padsRef     = useRef({ landlord:null, tenant:null });
   const contractRef = useRef(null);
+  const bigCanvasRef = useRef(null);
+  const bigPadRef = useRef(null);
   const [ready,       setReady]       = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [lHint, setLHint] = useState(true);
   const [tHint, setTHint] = useState(true);
+  const [sigData, setSigData] = useState({ landlord:null, tenant:null });
+  const [bigSig, setBigSig] = useState(null);
 
   const fmtM = (n) => parseInt(n||0).toLocaleString();
   const todayROC = toROC(new Date().toISOString().slice(0,10));
@@ -1394,9 +1398,44 @@ function ContractModal({ room, tenant, onClose }) {
     });
   }, [ready]);
 
+  // ── 放大簽名 Pad 初始化 ───────────────────────────────
+  useEffect(() => {
+    if (!bigSig || !window.SignaturePad || !bigCanvasRef.current) return;
+    const cv = bigCanvasRef.current;
+    const ratio = window.devicePixelRatio || 1;
+    const rect = cv.getBoundingClientRect();
+    cv.width  = rect.width * ratio;
+    cv.height = rect.height * ratio;
+    cv.getContext("2d").scale(ratio, ratio);
+    const pad = new window.SignaturePad(cv, { penColor:"#111827", backgroundColor:"#ffffff", minWidth:1.2, maxWidth:3 });
+    const prev = sigData[bigSig.key];
+    if (prev) pad.fromDataURL(prev, { width:rect.width, height:rect.height });
+    bigPadRef.current = pad;
+    return () => { bigPadRef.current = null; };
+  }, [bigSig]);
+
   const clearSig = (k) => {
     padsRef.current[k]?.clear();
+    setSigData(s => ({ ...s, [k]:null }));
     if (k==="landlord") setLHint(true); else setTHint(true);
+  };
+
+  const confirmBigSig = () => {
+    if (!bigPadRef.current || bigPadRef.current.isEmpty()) { alert("請先簽名"); return; }
+    const dataUrl = bigPadRef.current.toDataURL("image/png");
+    const k = bigSig.key;
+    setSigData(s => ({ ...s, [k]:dataUrl }));
+    const smallRef = k==="landlord" ? landlordRef : tenantRef;
+    const cv = smallRef.current;
+    if (cv) {
+      const ctx = cv.getContext("2d");
+      ctx.clearRect(0,0,cv.width,cv.height);
+      const img = new Image();
+      img.onload = () => { ctx.drawImage(img, 0, 0, cv.width, cv.height); };
+      img.src = dataUrl;
+    }
+    if (k==="landlord") setLHint(false); else setTHint(false);
+    setBigSig(null);
   };
 
   // ── 下載 PDF ──────────────────────────────────────────
@@ -1533,7 +1572,7 @@ function ContractModal({ room, tenant, onClose }) {
           </Para>
         </Sec>
 
-        {/* ── 簽名區（html2canvas 會捕捉 canvas 內容）── */}
+        {/* ── 簽名區（點擊放大簽名，html2canvas 會捕捉 canvas 內容）── */}
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginTop:20 }}>
           {[
             { label:"出租人（房東）簽名", key:"landlord", ref:landlordRef, hint:lHint },
@@ -1541,24 +1580,51 @@ function ContractModal({ room, tenant, onClose }) {
           ].map(({ label, key, ref, hint }) => (
             <div key={key}>
               <div style={{ fontSize:12, fontWeight:700, color:T.textSub, marginBottom:6 }}>{label}</div>
-              <div style={{ position:"relative", border:`1.5px dashed ${T.border}`, borderRadius:8, background:"#fafafa", height:90, overflow:"hidden" }}>
-                <canvas ref={ref} style={{ width:"100%", height:"100%", display:"block" }}/>
+              <div onClick={()=>setBigSig({ key, label })}
+                style={{ position:"relative", border:`1.5px dashed ${T.accent}88`, borderRadius:8, background:"#fafafa", height:90, overflow:"hidden", cursor:"pointer" }}
+                title="點擊放大簽名">
+                <canvas ref={ref} style={{ width:"100%", height:"100%", display:"block", pointerEvents:"none" }}/>
                 {hint && (
-                  <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, color:T.textMuted, pointerEvents:"none" }}>
-                    請在此簽名
+                  <div style={{ position:"absolute", inset:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", fontSize:12, color:T.accent, pointerEvents:"none", gap:3, fontWeight:600 }}>
+                    <span style={{ fontSize:18 }}>✍️</span>
+                    <span>點擊此處放大簽名</span>
                   </div>
                 )}
               </div>
-              <button onClick={()=>clearSig(key)} style={{ marginTop:4, background:"none", border:"none", fontSize:11, color:T.textMuted, cursor:"pointer", padding:0, fontFamily:"inherit" }}>✕ 清除</button>
-              <div style={{ fontSize:11, color:T.textMuted, marginTop:2 }}>日期：{todayROC}</div>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:4 }}>
+                <button onClick={(e)=>{e.stopPropagation(); clearSig(key);}} style={{ background:"none", border:"none", fontSize:11, color:T.textMuted, cursor:"pointer", padding:0, fontFamily:"inherit" }}>✕ 清除</button>
+                <span style={{ fontSize:11, color:T.textMuted }}>日期：{todayROC}</span>
+              </div>
             </div>
           ))}
         </div>
       </div>
 
       <div style={{ fontSize:11, color:T.textMuted, textAlign:"center", marginTop:10, lineHeight:1.6 }}>
-        ※ 此為系統自動產出之合約草稿，簽名後下載 PDF 留存正本。
+        ※ 此為系統自動產出之合約草稿，點擊簽名欄位可放大簽名，簽名後下載 PDF 留存正本。
       </div>
+
+      {/* ── 放大簽名 Modal ── */}
+      {bigSig && (
+        <div onClick={(e)=>{ if(e.target===e.currentTarget) setBigSig(null); }}
+          style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", zIndex:3000, display:"flex", alignItems:"center", justifyContent:"center", padding:12 }}>
+          <div style={{ background:"#fff", borderRadius:14, padding:"16px 16px 14px", width:"min(700px,96vw)", display:"flex", flexDirection:"column", gap:10 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div style={{ fontSize:15, fontWeight:800, color:T.text }}>✍️ {bigSig.label}</div>
+              <button onClick={()=>setBigSig(null)} style={{ background:"none", border:"none", cursor:"pointer", color:T.textSub, fontSize:20, padding:4, fontFamily:"inherit" }}>×</button>
+            </div>
+            <div style={{ border:`2px dashed ${T.accent}`, borderRadius:10, background:"#fff", height:"min(55vh,360px)", touchAction:"none" }}>
+              <canvas ref={bigCanvasRef} style={{ width:"100%", height:"100%", display:"block", borderRadius:10 }}/>
+            </div>
+            <div style={{ fontSize:12, color:T.textMuted, textAlign:"center" }}>請在上方空白區域以手指或滑鼠完成簽名</div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={()=>bigPadRef.current?.clear()} style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:10, padding:"12px", fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>🗑 清除重簽</button>
+              <button onClick={()=>setBigSig(null)} style={{ flex:1, background:"#fff", color:T.textSub, border:`1px solid ${T.border}`, borderRadius:10, padding:"12px", fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>取消</button>
+              <button onClick={confirmBigSig} style={{ flex:1.2, background:T.accent, color:"#fff", border:"none", borderRadius:10, padding:"12px", fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>✓ 確認簽名</button>
+            </div>
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }
