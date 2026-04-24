@@ -1145,18 +1145,18 @@ function PaymentRecords({ room, currentUser, isViewer, onUpdate, onViewPhoto }) 
             onChange={e => setNoteInput(e.target.value)}
             placeholder="例：4月租金 NT$16,000"
           />
-          <input id="pay-cam" type="file" accept="image/*" capture="environment" multiple style={{ display: "none" }} onChange={handleFileChange}/>
-          <input id="pay-pic" type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleFileChange}/>
-          <input id="pay-file" type="file" accept="image/*,application/pdf,*/*" multiple style={{ display: "none" }} onChange={handleFileChange}/>
+          <input id={`pay-cam-${room.id}`} type="file" accept="image/*" capture="environment" multiple style={{ display: "none" }} onChange={handleFileChange}/>
+          <input id={`pay-pic-${room.id}`} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleFileChange}/>
+          <input id={`pay-file-${room.id}`} type="file" accept="image/*,application/pdf,*/*" multiple style={{ display: "none" }} onChange={handleFileChange}/>
           {uploading ? (
             <div style={{ width: "100%", background: T.accent, color: "#fff", borderRadius: 8, padding: "10px", fontSize: 14, fontWeight: 700, textAlign: "center", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
               <div style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid #fff4", borderTopColor: "#fff", animation: "spin 0.7s linear infinite" }}/> 上傳中...
             </div>
           ) : (
             <div style={{ display: "flex", gap: 6 }}>
-              <label htmlFor="pay-cam" style={{ flex: 1, background: T.accent, color: "#fff", borderRadius: 8, padding: "10px", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "center" }}>📷 拍照</label>
-              <label htmlFor="pay-pic" style={{ flex: 1, background: "#10b981", color: "#fff", borderRadius: 8, padding: "10px", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "center" }}>🖼 相簿</label>
-              <label htmlFor="pay-file" style={{ flex: 1, background: "#6366f1", color: "#fff", borderRadius: 8, padding: "10px", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "center" }}>📎 檔案</label>
+              <label htmlFor={`pay-cam-${room.id}`} style={{ flex: 1, background: T.accent, color: "#fff", borderRadius: 8, padding: "10px", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "center" }}>📷 拍照</label>
+              <label htmlFor={`pay-pic-${room.id}`} style={{ flex: 1, background: "#10b981", color: "#fff", borderRadius: 8, padding: "10px", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "center" }}>🖼 相簿</label>
+              <label htmlFor={`pay-file-${room.id}`} style={{ flex: 1, background: "#6366f1", color: "#fff", borderRadius: 8, padding: "10px", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "center" }}>📎 檔案</label>
             </div>
           )}
         </div>
@@ -1411,7 +1411,7 @@ function ContractModal({ room, tenant, onClose }) {
     const prev = sigData[bigSig.key];
     if (prev) pad.fromDataURL(prev, { width:rect.width, height:rect.height });
     bigPadRef.current = pad;
-    return () => { bigPadRef.current = null; };
+    return () => { pad.off(); bigPadRef.current = null; };
   }, [bigSig]);
 
   const clearSig = (k) => {
