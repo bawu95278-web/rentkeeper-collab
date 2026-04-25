@@ -127,6 +127,23 @@ const getGhToken = () => { try { return localStorage.getItem(GH_TOKEN_KEY) || ""
 const setGhToken = (t) => { try { t ? localStorage.setItem(GH_TOKEN_KEY, t) : localStorage.removeItem(GH_TOKEN_KEY); } catch {} };
 const hasGhToken = () => !!getGhToken();
 
+// 輕量連線檢查：只打 repo 中繼資料，不抓 data.json 內容、不動 _ghSha
+async function cloudPing() {
+  const token = getGhToken();
+  if (!token) return { ok:false, reason:"no_token" };
+  try {
+    const res = await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}`, {
+      headers: { Authorization:`Bearer ${token}`, Accept:"application/vnd.github+json" },
+      cache: "no-store",
+    });
+    if (res.status === 401 || res.status === 403) return { ok:false, reason:"auth" };
+    if (!res.ok) return { ok:false, reason:`http_${res.status}` };
+    return { ok:true };
+  } catch {
+    return { ok:false, reason:"network" };
+  }
+}
+
 async function cloudLoad() {
   const token = getGhToken();
   if (!token) return { ok:false, reason:"no_token" };
@@ -3909,19 +3926,25 @@ function RentKeeperApp() {
   }, []);
 
   // 每 60 秒背景檢查雲端狀態，避免徽章卡在「離線」假訊息
+  const cloudStatusRef = useRef(cloudStatus);
+  useEffect(() => { cloudStatusRef.current = cloudStatus; }, [cloudStatus]);
   useEffect(() => {
     if (!hasGhToken()) return;
     const t = setInterval(async () => {
       if (!mounted.current) return;
-      // 同步中/連線中時不打擾
-      if (cloudStatus === "syncing" || cloudStatus === "loading") return;
-      const r = await cloudLoad();
-      if (!mounted.current) return;
-      if (r.ok) setCloudStatus("synced");
-      else setCloudStatus(r.reason === "auth" ? "error" : "offline");
+      // 避免與使用者觸發的同步互搶
+      const cs = cloudStatusRef.current;
+      if (cs === "syncing" || cs === "loading") return;
+      try {
+        const r = await cloudPing();
+        if (!mounted.current) return;
+        setCloudStatus(r.ok ? "synced" : (r.reason === "auth" ? "error" : "offline"));
+      } catch {
+        if (mounted.current) setCloudStatus("offline");
+      }
     }, 60000);
     return () => clearInterval(t);
-  }, [cloudStatus]);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -4159,7 +4182,7 @@ function RentKeeperApp() {
               <button onClick={async()=>{
                 if (hasGhToken()) {
                   setCloudStatus("loading");
-                  const r = await cloudLoad();
+                  const r = await cloudPing();
                   if (r.ok) {
                     setCloudStatus("synced");
                     showToast("雲端連線正常 ☁");
