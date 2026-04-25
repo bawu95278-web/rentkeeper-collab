@@ -3624,7 +3624,8 @@ function ActivityLog({ data, currentUser, onUpdate }) {
     reader.onload = (ev) => {
       try {
         const wb = XLSX.read(new Uint8Array(ev.target.result), { type:"array" });
-        const sheetByName = (n) => wb.Sheets[n] ? XLSX.utils.sheet_to_json(wb.Sheets[n], { defval:"", range:1 }) : []; // range:1 跳過第二列「填寫說明」
+        // 第 1 列為欄位名稱、第 2 列為填寫說明（黃底）、第 3 列起為資料 → 解析後丟掉第一筆（即說明列）
+        const sheetByName = (n) => wb.Sheets[n] ? XLSX.utils.sheet_to_json(wb.Sheets[n], { defval:"" }).slice(1) : [];
         const rRows = sheetByName("房源");
         const tRows = sheetByName("租客");
         const bRows = sheetByName("帳單");
