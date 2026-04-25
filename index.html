@@ -3771,10 +3771,18 @@ function RentKeeperApp() {
       if (hasGhToken()) {
         const r = await cloudLoad();
         if (r.ok) {
-          if (r.data && (r.data.rooms||[]).length > 0) {
+          const cloudHas = r.data && (r.data.rooms||[]).length > 0;
+          const localHas = d && (d.rooms||[]).length > 0;
+          const cloudTs = (r.data && r.data._lastModified) || 0;
+          const localTs = (d && d._lastModified) || 0;
+          // 只有「雲端比較新」或「本機沒資料」才覆蓋本機
+          if (cloudHas && (!localHas || cloudTs > localTs)) {
             d = r.data;
             await saveData(d);
-          } else if (d && (d.rooms||[]).length > 0) {
+          } else if (localHas && localTs > cloudTs) {
+            // 本機比較新（含未同步成功的編輯），把本機推回雲端
+            await cloudSave(d);
+          } else if (!cloudHas && localHas) {
             await cloudSave(d);
           }
           if (mounted.current) setCloudStatus("synced");
@@ -3795,8 +3803,9 @@ function RentKeeperApp() {
 
   const updateData = useCallback((fn) => {
     setData(prev => {
-      const next = fn(prev);
-      if (!next) return prev;
+      const raw = fn(prev);
+      if (!raw) return prev;
+      const next = { ...raw, _lastModified: Date.now() };
       (async () => { await saveData(next); if (mounted.current) { setSyncing(false); showToast("已儲存"); } })();
       if (hasGhToken()) {
         if (cloudSaveTimer.current) clearTimeout(cloudSaveTimer.current);
