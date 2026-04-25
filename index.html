@@ -7,6 +7,7 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
   <style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Noto Sans TC',sans-serif}</style>
@@ -3493,7 +3494,9 @@ function ActivityLog({ data, currentUser, onUpdate }) {
   const [showPL,           setShowPL]           = useState(false);
   const [plYear,           setPlYear]           = useState(thisYear);
   const [pendingImport,    setPendingImport]    = useState(null); // { data, meta }
+  const [pendingExcel,     setPendingExcel]     = useState(null); // { rooms, tenants, bills, repairs, summary, fileName }
   const importFileRef                           = useRef(null);
+  const importExcelRef                          = useRef(null);
 
   // ── 年度損益計算 ──────────────────────────────────────
   const plBillYears = [...new Set((bills||[]).map(b=>b.month?.slice(0,4)).filter(Boolean).map(Number))];
@@ -3611,6 +3614,184 @@ function ActivityLog({ data, currentUser, onUpdate }) {
     showToast("已還原備份資料！", "success");
   };
 
+  // ── 匯入 Excel 範本（房源/租客/帳單/維修）────────────────
+  const handleImportExcel = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (typeof XLSX === "undefined") { showToast("Excel 解析模組未載入，請重新整理頁面","error"); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const wb = XLSX.read(new Uint8Array(ev.target.result), { type:"array" });
+        const sheetByName = (n) => wb.Sheets[n] ? XLSX.utils.sheet_to_json(wb.Sheets[n], { defval:"", range:1 }) : []; // range:1 跳過第二列「填寫說明」
+        const rRows = sheetByName("房源");
+        const tRows = sheetByName("租客");
+        const bRows = sheetByName("帳單");
+        const xRows = sheetByName("維修");
+        if (!rRows.length && !tRows.length && !bRows.length && !xRows.length) {
+          showToast("Excel 內找不到任何資料分頁（房源/租客/帳單/維修）","error"); return;
+        }
+        // 建立物件名稱 → roomId 的對應（含現有資料）
+        const nameToRoomId = new Map((data.rooms||[]).map(r => [String(r.communityName).trim(), r.id]));
+        const newRooms = [];
+        let updRoomCnt = 0;
+        rRows.forEach(row => {
+          const name = String(row["物件名稱*"]||row["物件名稱"]||"").trim();
+          if (!name) return;
+          const exists = (data.rooms||[]).find(r => String(r.communityName).trim() === name);
+          const base = exists || { id: uid(), cohabitants:[], renewals:[] };
+          const merged = {
+            ...base,
+            communityName: name,
+            address: String(row["地址"]||base.address||""),
+            rent: Number(row["月租金*"]||row["月租金"]||base.rent||0),
+            status: String(row["狀態*"]||row["狀態"]||base.status||"vacant"),
+            rentDay: String(row["繳租日"]||base.rentDay||"5"),
+            leaseStart: String(row["起租日"]||base.leaseStart||""),
+            contractEnd: String(row["到期日"]||base.contractEnd||""),
+            tenantContactName: String(row["租客姓名"]||base.tenantContactName||""),
+            tenantContactPhone: String(row["租客電話"]||base.tenantContactPhone||""),
+            note: String(row["備註"]||base.note||""),
+          };
+          if (exists) updRoomCnt++; else newRooms.push(merged);
+          nameToRoomId.set(name, merged.id);
+        });
+        const newTenants = [];
+        let updTenantCnt = 0;
+        tRows.forEach(row => {
+          const name = String(row["姓名*"]||row["姓名"]||"").trim();
+          const phone = String(row["電話*"]||row["電話"]||"").trim();
+          if (!name) return;
+          const roomName = String(row["對應物件名稱"]||"").trim();
+          const roomId = roomName ? nameToRoomId.get(roomName) || "" : "";
+          const exists = (data.tenants||[]).find(t => t.name === name && t.phone === phone);
+          const merged = {
+            id: exists?.id || uid(),
+            name, phone,
+            email: String(row["Email"]||exists?.email||""),
+            roomId,
+            moveIn: String(row["入住日"]||exists?.moveIn||""),
+            contractEnd: String(row["合約到期日"]||exists?.contractEnd||""),
+            deposit: Number(row["押金"]||exists?.deposit||0),
+            isCohabitant: String(row["是否同住人"]||"").trim() === "是",
+            linkedRoom: roomId || exists?.linkedRoom || undefined,
+            note: String(row["備註"]||exists?.note||""),
+          };
+          if (exists) updTenantCnt++; else newTenants.push(merged);
+        });
+        const newBills = [];
+        bRows.forEach(row => {
+          const roomName = String(row["物件名稱*"]||row["物件名稱"]||"").trim();
+          const roomId = nameToRoomId.get(roomName);
+          if (!roomId) return;
+          const month = String(row["月份*"]||row["月份"]||"").trim();
+          const item = String(row["項目*"]||row["項目"]||"rent").trim();
+          if (!month) return;
+          const status = String(row["狀態*"]||row["狀態"]||"unpaid").trim();
+          const dup = (data.bills||[]).find(b => b.roomId===roomId && b.month===month && b.item===item);
+          if (dup) return; // 已存在不重複匯入
+          newBills.push({
+            id: uid(), roomId, month, item,
+            amount: Number(row["金額*"]||row["金額"]||0),
+            status,
+            paidAt: String(row["繳款日"]||""),
+            note: String(row["備註"]||""),
+          });
+        });
+        const newRepairs = [];
+        xRows.forEach(row => {
+          const roomName = String(row["物件名稱*"]||row["物件名稱"]||"").trim();
+          const roomId = nameToRoomId.get(roomName);
+          if (!roomId) return;
+          const desc = String(row["問題描述*"]||row["問題描述"]||"").trim();
+          if (!desc) return;
+          newRepairs.push({
+            id: uid(), roomId,
+            reportDate: String(row["通報日*"]||row["通報日"]||""),
+            description: desc,
+            status: String(row["狀態*"]||row["狀態"]||"pending").trim(),
+            handler: String(row["處理人員"]||""),
+            doneDate: String(row["完成日"]||""),
+            cost: Number(row["費用"]||0),
+            note: String(row["備註"]||""),
+          });
+        });
+        setPendingExcel({
+          fileName: file.name,
+          newRooms, updRoomCnt,
+          newTenants, updTenantCnt,
+          newBills, newRepairs,
+          // 完整快照供寫回時用
+          allRooms: [
+            ...(data.rooms||[]).map(r => {
+              const m = newRooms.find(n => n.id === r.id);
+              const u = rRows.map(row => String(row["物件名稱*"]||row["物件名稱"]||"").trim()).includes(r.communityName);
+              if (u) {
+                // 此 row 已存在於 newRooms 或被 update — 從 rRows 重新合併
+                const row = rRows.find(rw => String(rw["物件名稱*"]||rw["物件名稱"]||"").trim() === r.communityName);
+                if (row) return {
+                  ...r,
+                  address: String(row["地址"]||r.address||""),
+                  rent: Number(row["月租金*"]||row["月租金"]||r.rent||0),
+                  status: String(row["狀態*"]||row["狀態"]||r.status||"vacant"),
+                  rentDay: String(row["繳租日"]||r.rentDay||"5"),
+                  leaseStart: String(row["起租日"]||r.leaseStart||""),
+                  contractEnd: String(row["到期日"]||r.contractEnd||""),
+                  tenantContactName: String(row["租客姓名"]||r.tenantContactName||""),
+                  tenantContactPhone: String(row["租客電話"]||r.tenantContactPhone||""),
+                  note: String(row["備註"]||r.note||""),
+                };
+              }
+              return r;
+            }),
+            ...newRooms,
+          ],
+          allTenants: [
+            ...(data.tenants||[]).map(t => {
+              const dup = tRows.find(row => String(row["姓名*"]||row["姓名"]||"").trim() === t.name && String(row["電話*"]||row["電話"]||"").trim() === t.phone);
+              if (dup) {
+                const roomName = String(dup["對應物件名稱"]||"").trim();
+                return {
+                  ...t,
+                  email: String(dup["Email"]||t.email||""),
+                  roomId: roomName ? (nameToRoomId.get(roomName) || t.roomId) : t.roomId,
+                  moveIn: String(dup["入住日"]||t.moveIn||""),
+                  contractEnd: String(dup["合約到期日"]||t.contractEnd||""),
+                  deposit: Number(dup["押金"]||t.deposit||0),
+                  isCohabitant: String(dup["是否同住人"]||"").trim() === "是",
+                };
+              }
+              return t;
+            }),
+            ...newTenants,
+          ],
+          allBills: [...(data.bills||[]), ...newBills],
+          allRepairs: [...(data.repairs||[]), ...newRepairs],
+        });
+      } catch (err) {
+        showToast("Excel 解析失敗："+err.message, "error");
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const confirmImportExcel = () => {
+    if (!pendingExcel) return;
+    const p = pendingExcel;
+    const summary = `匯入 Excel：新增 ${p.newRooms.length} 房源、更新 ${p.updRoomCnt}，新增 ${p.newTenants.length} 租客、更新 ${p.updTenantCnt}，新增 ${p.newBills.length} 帳單、${p.newRepairs.length} 維修（${p.fileName}）`;
+    onUpdate(d => ({
+      ...d,
+      rooms: p.allRooms,
+      tenants: p.allTenants,
+      bills: p.allBills,
+      repairs: p.allRepairs,
+      activityLog: [...(d.activityLog||[]), { id: uid(), userId: currentUser?.id || "system", action: summary, timestamp: nowISO() }],
+    }));
+    setPendingExcel(null);
+    showToast("Excel 匯入完成！", "success");
+  };
+
   // ── 匯出系統備份（JSON）────────────────────────────────
   const exportBackup = () => {
     const ts   = new Date().toISOString();
@@ -3679,6 +3860,14 @@ function ActivityLog({ data, currentUser, onUpdate }) {
                 style={{ flex:1, background:T.bg, color:T.red, border:`1px solid ${T.red}44`, borderRadius:10, padding:"11px 8px", fontSize:14, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6, fontFamily:"inherit" }}>
                 🗑 清空記錄
               </button>
+            </div>
+            <input ref={importExcelRef} type="file" accept=".xlsx,.xls" style={{ display:"none" }} onChange={handleImportExcel}/>
+            <button onClick={()=>importExcelRef.current?.click()}
+              style={{ width:"100%", background:"#16a34a", color:"#fff", border:"none", borderRadius:10, padding:"11px", fontSize:14, fontWeight:700, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6, fontFamily:"inherit", marginTop:2 }}>
+              📊 匯入 Excel 範本（房源/租客/帳單/維修）
+            </button>
+            <div style={{ fontSize:11, color:T.textMuted, lineHeight:1.6, padding:"0 4px" }}>
+              使用 <strong>RentKeeper_資料匯入範本_v1.0.xlsx</strong>，依物件名稱比對：相同→更新、新名稱→新增；帳單/維修為純新增。
             </div>
           </>
         )}
@@ -3863,6 +4052,41 @@ function ActivityLog({ data, currentUser, onUpdate }) {
               <button onClick={confirmImportBackup}
                 style={{ flex:1, background:T.green, color:"#fff", border:"none", borderRadius:8, padding:"11px", fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
                 確認還原
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ── 確認匯入 Excel 對話框 ── */}
+      {pendingExcel && (
+        <Modal title="📊 確認匯入 Excel" onClose={()=>setPendingExcel(null)} width={460}>
+          <div style={{ padding:"4px 0 16px" }}>
+            <div style={{ background:"#ecfdf5", border:"1px solid #16a34a55", borderRadius:8, padding:"12px 14px", marginBottom:14 }}>
+              <div style={{ color:"#15803d", fontWeight:700, fontSize:13, marginBottom:6 }}>✓ 將合併到目前資料（不會清除既有資料）</div>
+              <div style={{ fontSize:12, color:T.textSub, lineHeight:1.7 }}>
+                檔名：<strong>{pendingExcel.fileName}</strong>
+              </div>
+            </div>
+            <div style={{ background:T.bgSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"12px 14px", marginBottom:14, fontSize:13, color:T.text, lineHeight:1.9 }}>
+              🏠 房源：新增 <strong style={{ color:T.green }}>{pendingExcel.newRooms.length}</strong>　|　更新 <strong style={{ color:T.accent }}>{pendingExcel.updRoomCnt}</strong><br/>
+              👤 租客：新增 <strong style={{ color:T.green }}>{pendingExcel.newTenants.length}</strong>　|　更新 <strong style={{ color:T.accent }}>{pendingExcel.updTenantCnt}</strong><br/>
+              💰 帳單：新增 <strong style={{ color:T.green }}>{pendingExcel.newBills.length}</strong> 筆<br/>
+              🔧 維修：新增 <strong style={{ color:T.green }}>{pendingExcel.newRepairs.length}</strong> 筆
+            </div>
+            <div style={{ fontSize:11, color:T.textMuted, marginBottom:14, lineHeight:1.6 }}>
+              · 房源/租客以「物件名稱+租客姓名」為主鍵比對<br/>
+              · 帳單以「物件+月份+項目」去重，重複資料會略過<br/>
+              · 維修為純新增（不會去重）
+            </div>
+            <div style={{ display:"flex", gap:10 }}>
+              <button onClick={()=>setPendingExcel(null)}
+                style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"11px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>
+                取消
+              </button>
+              <button onClick={confirmImportExcel}
+                style={{ flex:1, background:T.green, color:"#fff", border:"none", borderRadius:8, padding:"11px", fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
+                確認匯入
               </button>
             </div>
           </div>
