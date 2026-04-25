@@ -3908,6 +3908,21 @@ function RentKeeperApp() {
     return () => { mounted.current = false; };
   }, []);
 
+  // 每 60 秒背景檢查雲端狀態，避免徽章卡在「離線」假訊息
+  useEffect(() => {
+    if (!hasGhToken()) return;
+    const t = setInterval(async () => {
+      if (!mounted.current) return;
+      // 同步中/連線中時不打擾
+      if (cloudStatus === "syncing" || cloudStatus === "loading") return;
+      const r = await cloudLoad();
+      if (!mounted.current) return;
+      if (r.ok) setCloudStatus("synced");
+      else setCloudStatus(r.reason === "auth" ? "error" : "offline");
+    }, 60000);
+    return () => clearInterval(t);
+  }, [cloudStatus]);
+
   useEffect(() => {
     (async () => {
       let d = await loadData();
@@ -4141,7 +4156,19 @@ function RentKeeperApp() {
             };
             const s = map[cs] || map.unset;
             return (
-              <button onClick={()=>{ setCloudTokenInput(getGhToken()); setShowCloudCfg(true); }}
+              <button onClick={async()=>{
+                if (hasGhToken()) {
+                  setCloudStatus("loading");
+                  const r = await cloudLoad();
+                  if (r.ok) {
+                    setCloudStatus("synced");
+                    showToast("雲端連線正常 ☁");
+                    return;
+                  }
+                  setCloudStatus(r.reason === "auth" ? "error" : "offline");
+                }
+                setCloudTokenInput(getGhToken()); setShowCloudCfg(true);
+              }}
                 title={s.t}
                 style={{ background:"none", border:`1px solid ${s.c}55`, borderRadius:14, padding:"3px 9px", cursor:"pointer", color:s.c, fontSize:11, fontWeight:700, display:"flex", alignItems:"center", gap:4, fontFamily:"inherit" }}>
                 <span style={{ fontSize:12 }}>{s.ico}</span>{s.txt}
