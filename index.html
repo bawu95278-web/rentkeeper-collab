@@ -180,6 +180,145 @@ async function cloudSave(data) {
 }
 
 // ═══════════════════════════════════════════════════════
+//  PHOTO STORAGE (separate file per photo, original quality)
+// ═══════════════════════════════════════════════════════
+const _blobUrlCache = new Map(); // cloudPath -> blobUrl
+const _blobUrlPending = new Map(); // cloudPath -> Promise
+
+function _extOf(file){
+  const fromName = (file.name||"").split(".").pop();
+  if (fromName && fromName.length<=5) return fromName.toLowerCase();
+  const m = (file.type||"").split("/")[1];
+  return (m||"bin").toLowerCase();
+}
+
+// 產縮圖：圖片→256x256 q=0.7（~10KB）；非圖片→空字串（顯示用 icon）
+function makeThumb(file){
+  return new Promise(resolve=>{
+    if (!file.type.startsWith("image/")) return resolve("");
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const img = new Image();
+      img.onload = () => {
+        const max = 256;
+        const r = Math.min(1, max/Math.max(img.width, img.height));
+        const w = Math.round(img.width*r), h = Math.round(img.height*r);
+        const c = document.createElement("canvas");
+        c.width = w; c.height = h;
+        c.getContext("2d").drawImage(img, 0, 0, w, h);
+        try { resolve(c.toDataURL("image/jpeg", 0.7)); } catch { resolve(""); }
+      };
+      img.onerror = () => resolve("");
+      img.src = ev.target.result;
+    };
+    reader.onerror = () => resolve("");
+    reader.readAsDataURL(file);
+  });
+}
+
+// File → base64（不含 data: 前綴）
+function fileToBase64(file){
+  return new Promise((resolve, reject)=>{
+    const r = new FileReader();
+    r.onload = ev => {
+      const s = ev.target.result;
+      const i = s.indexOf("base64,");
+      resolve(i>=0 ? s.slice(i+7) : btoa(s));
+    };
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+
+// 上傳一張原始檔到 GitHub repo 的 photos/{id}.{ext}
+async function cloudUploadPhoto(file){
+  const token = getGhToken();
+  if (!token) return { ok:false, reason:"no_token" };
+  const id = uid() + Date.now().toString(36);
+  const ext = _extOf(file);
+  const path = `photos/${id}.${ext}`;
+  try {
+    const content = await fileToBase64(file);
+    const res = await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}`, {
+      method:"PUT",
+      headers:{ Authorization:`Bearer ${token}`, Accept:"application/vnd.github+json", "Content-Type":"application/json" },
+      body: JSON.stringify({ message:`upload ${path}`, content }),
+    });
+    if (res.status === 401 || res.status === 403) return { ok:false, reason:"auth" };
+    if (!res.ok) return { ok:false, reason:`http_${res.status}` };
+    return { ok:true, cloudPath:path };
+  } catch(e) {
+    return { ok:false, reason:"network" };
+  }
+}
+
+// 抓回原始檔，回傳 blob URL（有快取）
+async function cloudFetchPhotoUrl(cloudPath){
+  if (!cloudPath) return "";
+  if (_blobUrlCache.has(cloudPath)) return _blobUrlCache.get(cloudPath);
+  if (_blobUrlPending.has(cloudPath)) return _blobUrlPending.get(cloudPath);
+  const token = getGhToken();
+  if (!token) return "";
+  const p = (async () => {
+    try {
+      const res = await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${cloudPath}?t=${Date.now()}`, {
+        headers:{ Authorization:`Bearer ${token}`, Accept:"application/vnd.github.raw" },
+        cache:"no-store",
+      });
+      if (!res.ok) return "";
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      _blobUrlCache.set(cloudPath, url);
+      return url;
+    } catch { return ""; }
+    finally { _blobUrlPending.delete(cloudPath); }
+  })();
+  _blobUrlPending.set(cloudPath, p);
+  return p;
+}
+
+async function cloudDeletePhoto(cloudPath){
+  if (!cloudPath) return { ok:true };
+  const token = getGhToken();
+  if (!token) return { ok:false, reason:"no_token" };
+  try {
+    // 取 SHA
+    const head = await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${cloudPath}?t=${Date.now()}`, {
+      headers:{ Authorization:`Bearer ${token}`, Accept:"application/vnd.github+json" }, cache:"no-store",
+    });
+    if (head.status === 404) return { ok:true }; // 已經沒了
+    if (!head.ok) return { ok:false, reason:`http_${head.status}` };
+    const j = await head.json();
+    const res = await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${cloudPath}`, {
+      method:"DELETE",
+      headers:{ Authorization:`Bearer ${token}`, Accept:"application/vnd.github+json", "Content-Type":"application/json" },
+      body: JSON.stringify({ message:`delete ${cloudPath}`, sha:j.sha }),
+    });
+    // 清快取
+    if (_blobUrlCache.has(cloudPath)) { try{ URL.revokeObjectURL(_blobUrlCache.get(cloudPath)); }catch{} _blobUrlCache.delete(cloudPath); }
+    return { ok:res.ok };
+  } catch { return { ok:false, reason:"network" }; }
+}
+
+// 完整流程：壓縮縮圖 + 上傳原始檔，回傳照片元資料
+// 失敗時退回 dataURL 模式（離線可用、之後可同步）
+async function processPhotoUpload(file){
+  const isImage = file.type.startsWith("image/");
+  const thumb = await makeThumb(file);
+  if (hasGhToken()) {
+    const r = await cloudUploadPhoto(file);
+    if (r.ok) {
+      return { id: uid(), name: file.name||"", mime: file.type||"", size: file.size||0, isImage, thumb, cloudPath: r.cloudPath, uploadedAt: nowISO() };
+    }
+  }
+  // 退路：沒 token 或上傳失敗 → 仍以 dataURL 存（之後加遷移工具）
+  const dataUrl = await new Promise((resolve, reject) => {
+    const r = new FileReader(); r.onload = e => resolve(e.target.result); r.onerror = reject; r.readAsDataURL(file);
+  });
+  return { id: uid(), name: file.name||"", mime: file.type||"", size: file.size||0, isImage, thumb, dataUrl, uploadedAt: nowISO() };
+}
+
+// ═══════════════════════════════════════════════════════
 //  UTILS
 // ═══════════════════════════════════════════════════════
 const fmt       = (n) => `NT$ ${Number(n || 0).toLocaleString()}`;
@@ -360,6 +499,62 @@ const Icon = ({ n, s=18 }) => {
 const JRMLogo = ({ s=56 }) => (
   <img src="./jrm-logo.jpg" alt="J.R.M 家樂美房產管理顧問" width={s} height={s} style={{ display:"block", objectFit:"contain", borderRadius:6 }}/>
 );
+
+// ═══════════════════════════════════════════════════════
+//  CloudPhoto: 縮圖瞬間顯示，點擊/下載時才抓原圖
+// ═══════════════════════════════════════════════════════
+// p 可為新格式 {id,thumb,cloudPath,name,isImage,...} 或舊格式 {dataUrl,name,...}
+function CloudPhoto({ p, size=64, onView, downloadName, allowDelete, onDelete }) {
+  const [fullUrl, setFullUrl] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const isImg = p && (p.isImage !== false) && (
+    (p.thumb||"").startsWith("data:image/") ||
+    (p.dataUrl||"").startsWith("data:image/") ||
+    (p.mime||"").startsWith("image/") ||
+    !p.cloudPath && !p.dataUrl // 預設當圖片
+  );
+  const previewSrc = (p && (p.thumb || p.dataUrl)) || "";
+  const ensureFull = React.useCallback(async () => {
+    if (fullUrl) return fullUrl;
+    if (p.dataUrl) { setFullUrl(p.dataUrl); return p.dataUrl; }
+    if (p.cloudPath) {
+      setLoading(true);
+      const u = await cloudFetchPhotoUrl(p.cloudPath);
+      setLoading(false);
+      if (u) setFullUrl(u);
+      return u;
+    }
+    return "";
+  }, [p, fullUrl]);
+
+  const handleView = async () => {
+    const u = await ensureFull();
+    if (u && onView) onView(u);
+  };
+  const handleDownload = async (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const u = await ensureFull();
+    if (!u) return;
+    const a = document.createElement("a");
+    a.href = u; a.download = downloadName || p.name || "download";
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+
+  return (
+    <div style={{ position:"relative", width:size, height:size, flexShrink:0 }}>
+      {isImg
+        ? (previewSrc
+            ? <img src={previewSrc} style={{ width:size, height:size, borderRadius:7, objectFit:"cover", cursor:"pointer", border:"1px solid #e5e7eb" }} onClick={handleView}/>
+            : <div onClick={handleView} style={{ width:size, height:size, borderRadius:7, background:"#f3f4f6", color:"#9ca3af", display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", border:"1px solid #e5e7eb", fontSize:Math.round(size*0.4) }}>🖼</div>)
+        : <a onClick={handleDownload} style={{ width:size, height:size, borderRadius:7, border:"1px solid #e5e7eb", background:"#f9fafb", color:"#6b7280", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", textDecoration:"none", fontSize:11, fontWeight:700, cursor:"pointer" }} href="#">
+            📎<span style={{ marginTop:2, fontSize:9, maxWidth:size-10, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p.name||"檔案"}</span>
+          </a>}
+      {loading && <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,0.35)", color:"#fff", borderRadius:7, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11 }}>⏳</div>}
+      <a href="#" onClick={handleDownload} title="下載原始檔" style={{ position:"absolute", bottom:3, right:3, background:"rgba(0,0,0,0.55)", color:"#fff", borderRadius:4, padding:"2px 5px", fontSize:10, textDecoration:"none", lineHeight:1 }}>⬇</a>
+      {allowDelete && <button onClick={onDelete} style={{ position:"absolute", top:-5, right:-5, width:18, height:18, borderRadius:"50%", background:"#ef4444", color:"#fff", border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontFamily:"inherit", padding:0 }}>✕</button>}
+    </div>
+  );
+}
 
 // ═══════════════════════════════════════════════════════
 //  UI PRIMITIVES
@@ -1807,21 +2002,35 @@ function Rooms({ data, currentUser, onUpdate }) {
   const bankRef        = useRef(null);
   const inspectionRef  = useRef(null);
   const sf = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
-  const handleInspectionUpload = (e) => {
-    Array.from(e.target.files).forEach(file => {
-      const reader = new FileReader();
-      reader.onload = ev => setForm(f => ({ ...f, inspectionPhotos:[...(f.inspectionPhotos||[]), { id:uid(), dataUrl:ev.target.result, uploadedAt:nowISO() }] }));
-      reader.readAsDataURL(file);
-    });
-    e.target.value = "";
+  const handleInspectionUpload = async (e) => {
+    const files = Array.from(e.target.files); e.target.value = "";
+    for (const file of files) {
+      const meta = await processPhotoUpload(file);
+      setForm(f => ({ ...f, inspectionPhotos:[...(f.inspectionPhotos||[]), meta] }));
+    }
   };
-  const handleContractUpload = (e) => {
-    Array.from(e.target.files).forEach(file => {
-      const reader = new FileReader();
-      reader.onload = ev => setForm(f => ({ ...f, contractPhotos:[...(f.contractPhotos||[]), { id:uid(), dataUrl:ev.target.result, uploadedAt:nowISO() }] }));
-      reader.readAsDataURL(file);
+  const handleContractUpload = async (e) => {
+    const files = Array.from(e.target.files); e.target.value = "";
+    for (const file of files) {
+      const meta = await processPhotoUpload(file);
+      setForm(f => ({ ...f, contractPhotos:[...(f.contractPhotos||[]), meta] }));
+    }
+  };
+  const handleBankUpload = async (e) => {
+    const files = Array.from(e.target.files); e.target.value = "";
+    for (const file of files) {
+      const meta = await processPhotoUpload(file);
+      setForm(f => ({ ...f, ownerBankPhotos:[...(f.ownerBankPhotos||[]), meta] }));
+    }
+  };
+  // 刪照片：移除 form 內陣列項目，並嘗試刪 GitHub 雲端原始檔
+  const removePhotoFrom = (key, idx) => {
+    setForm(f => {
+      const arr = f[key]||[];
+      const removed = arr[idx];
+      if (removed && removed.cloudPath) { cloudDeletePhoto(removed.cloudPath).catch(()=>{}); }
+      return { ...f, [key]: arr.filter((_,j)=>j!==idx) };
     });
-    e.target.value = "";
   };
 
   const openEdit = (room) => {
@@ -2169,57 +2378,43 @@ function Rooms({ data, currentUser, onUpdate }) {
                     );
                   })()}
 
-                  {((room.contractPhotos||[]).length>0||(room.contractPhoto&&!(room.contractPhotos||[]).length)||room.ownerBankPhoto) && <div style={{ marginBottom:10 }}>
-                    {(()=>{
-                      const photos = room.contractPhotos||(room.contractPhoto?[{id:room.id+"_legacy",dataUrl:room.contractPhoto}]:[]);
-                      return photos.length>0&&(
-                        <div style={{ marginBottom:8 }}>
-                          <div style={{ fontSize:12, fontWeight:700, color:T.textSub, marginBottom:6 }}>📄 租約電子檔</div>
-                          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
-                            {photos.map((p,i)=>(
-                              <div key={p.id||i} style={{ position:"relative" }}>
-                                <img src={p.dataUrl} style={{ width:64, height:64, borderRadius:7, objectFit:"cover", cursor:"pointer", border:`1px solid ${T.border}` }} onClick={()=>setViewPhoto(p.dataUrl)}/>
-                                <a href={p.dataUrl} download={`租約電子檔_${i+1}.jpg`} title="下載" style={{ position:"absolute", bottom:3, right:3, background:"rgba(0,0,0,0.52)", color:"#fff", borderRadius:4, padding:"2px 5px", fontSize:10, textDecoration:"none", lineHeight:1 }}>⬇</a>
-                              </div>
-                            ))}
+                  {(()=>{
+                    const contracts = (room.contractPhotos&&room.contractPhotos.length) ? room.contractPhotos : (room.contractPhoto?[{id:room.id+"_legacy",dataUrl:room.contractPhoto,isImage:true,name:"租約電子檔.jpg"}]:[]);
+                    const banks = (room.ownerBankPhotos&&room.ownerBankPhotos.length) ? room.ownerBankPhotos : (room.ownerBankPhoto?[{id:"_legacy",dataUrl:room.ownerBankPhoto,isImage:true,name:"屋主匯款帳號.jpg"}]:[]);
+                    if (!contracts.length && !banks.length) return null;
+                    return (
+                      <div style={{ marginBottom:10 }}>
+                        {contracts.length>0 && (
+                          <div style={{ marginBottom:8 }}>
+                            <div style={{ fontSize:12, fontWeight:700, color:T.textSub, marginBottom:6 }}>📄 租約電子檔</div>
+                            <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                              {contracts.map((p,i)=>(
+                                <CloudPhoto key={p.id||i} p={p} size={64} onView={u=>setViewPhoto(u)} downloadName={p.name||`租約電子檔_${i+1}.jpg`}/>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })()}
-                    {(() => {
-                      const banks = (room.ownerBankPhotos&&room.ownerBankPhotos.length) ? room.ownerBankPhotos : (room.ownerBankPhoto?[{id:"_legacy",dataUrl:room.ownerBankPhoto,isImage:true,name:"屋主匯款帳號.jpg"}]:[]);
-                      if (!banks.length) return null;
-                      return (
-                        <div>
-                          <div style={{ fontSize:12, fontWeight:700, color:T.textSub, marginBottom:6 }}>🏦 屋主匯款帳號</div>
-                          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
-                            {banks.map((p,i)=>{
-                              const isImg = p.isImage !== false && (p.dataUrl||"").startsWith("data:image/");
-                              return (
-                                <div key={p.id||i} style={{ position:"relative" }}>
-                                  {isImg
-                                    ? <img src={p.dataUrl} style={{ width:64, height:64, borderRadius:7, objectFit:"cover", cursor:"pointer", border:`1px solid ${T.border}` }} onClick={()=>setViewPhoto(p.dataUrl)}/>
-                                    : <a href={p.dataUrl} download={p.name||`匯款帳號_${i+1}`} style={{ width:64, height:64, borderRadius:7, border:`1px solid ${T.border}`, background:T.bgSub, color:T.textSub, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", textDecoration:"none", fontSize:11, fontWeight:700 }}>📎<span style={{ marginTop:2, fontSize:9, maxWidth:54, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p.name||"檔案"}</span></a>}
-                                  <a href={p.dataUrl} download={p.name||`匯款帳號_${i+1}.jpg`} title="下載" style={{ position:"absolute", bottom:3, right:3, background:"rgba(0,0,0,0.52)", color:"#fff", borderRadius:4, padding:"2px 5px", fontSize:10, textDecoration:"none", lineHeight:1 }}>⬇</a>
-                                </div>
-                              );
-                            })}
+                        )}
+                        {banks.length>0 && (
+                          <div>
+                            <div style={{ fontSize:12, fontWeight:700, color:T.textSub, marginBottom:6 }}>🏦 屋主匯款帳號</div>
+                            <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                              {banks.map((p,i)=>(
+                                <CloudPhoto key={p.id||i} p={p} size={64} onView={u=>setViewPhoto(u)} downloadName={p.name||`匯款帳號_${i+1}.jpg`}/>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })()}
-                  </div>}
+                        )}
+                      </div>
+                    );
+                  })()}
 
-                  {/* ── 出租點交室內照片（所有人可讀取下載） ── */}
+                  {/* ── 出租點交室內照片 ── */}
                   {(room.inspectionPhotos||[]).length>0&&(
                     <div style={{ marginBottom:10 }}>
                       <div style={{ fontSize:12, fontWeight:700, color:T.textSub, marginBottom:8 }}>📷 點交室內照片</div>
                       <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
                         {(room.inspectionPhotos||[]).map((p,i)=>(
-                          <div key={p.id||i} style={{ position:"relative" }}>
-                            <img src={p.dataUrl} style={{ width:64, height:64, borderRadius:7, objectFit:"cover", cursor:"pointer", border:`1px solid ${T.border}` }} onClick={()=>setViewPhoto(p.dataUrl)}/>
-                            <a href={p.dataUrl} download={`點交照片_${i+1}.jpg`} title="下載" style={{ position:"absolute", bottom:3, right:3, background:"rgba(0,0,0,0.52)", color:"#fff", borderRadius:4, padding:"2px 5px", fontSize:10, textDecoration:"none", lineHeight:1 }}>⬇</a>
-                          </div>
+                          <CloudPhoto key={p.id||i} p={p} size={64} onView={u=>setViewPhoto(u)} downloadName={p.name||`點交照片_${i+1}.jpg`}/>
                         ))}
                       </div>
                     </div>
@@ -2702,53 +2897,31 @@ function Rooms({ data, currentUser, onUpdate }) {
             {(form.contractPhotos||[]).length>0&&(
               <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:4 }}>
                 {(form.contractPhotos||[]).map((p,i)=>(
-                  <div key={p.id||i} style={{ position:"relative" }}>
-                    <img src={p.dataUrl} style={{ width:72, height:72, borderRadius:7, objectFit:"cover", border:`1px solid ${T.border}`, cursor:"pointer" }} onClick={()=>setViewPhoto(p.dataUrl)}/>
-                    <button onClick={()=>setForm(f=>({...f,contractPhotos:f.contractPhotos.filter((_,j)=>j!==i)}))}
-                      style={{ position:"absolute", top:-5, right:-5, width:18, height:18, borderRadius:"50%", background:T.red, color:"#fff", border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontFamily:"inherit", padding:0 }}>✕</button>
-                  </div>
+                  <CloudPhoto key={p.id||i} p={p} size={72} onView={u=>setViewPhoto(u)} downloadName={p.name||`租約電子檔_${i+1}.jpg`} allowDelete onDelete={()=>removePhotoFrom("contractPhotos", i)}/>
                 ))}
               </div>
             )}
           </div>
-          {/* 屋主匯款帳號：所有人可讀取下載，租客唯讀，其他角色可上傳/修改/刪除（多檔） */}
+          {/* 屋主匯款帳號：所有人可讀取下載，租客唯讀 */}
           <div style={{ marginBottom:10 }}>
-            <label style={S.label}>屋主匯款帳號 <span style={{ fontWeight:400, color:T.textMuted }}>（所有人可讀取下載，可多張；租客唯讀）</span></label>
-            {!isViewer && (() => {
-              const onBank = e => {
-                Array.from(e.target.files).forEach(file => {
-                  const isImg = file.type.startsWith("image/");
-                  const reader = new FileReader();
-                  reader.onload = ev => setForm(fm => ({ ...fm, ownerBankPhotos:[...(fm.ownerBankPhotos||[]), { id:uid(), dataUrl:ev.target.result, name:file.name||"", isImage:isImg, uploadedAt:nowISO() }] }));
-                  reader.readAsDataURL(file);
-                });
-                e.target.value = "";
-              };
-              return <>
-                <input id="bnk-cam" type="file" accept="image/*" capture="environment" multiple onChange={onBank} style={{ display:"none" }}/>
-                <input id="bnk-pic" type="file" accept="image/*" multiple onChange={onBank} style={{ display:"none" }}/>
-                <input id="bnk-file" type="file" accept="image/*,application/pdf,*/*" multiple onChange={onBank} style={{ display:"none" }}/>
+            <label style={S.label}>屋主匯款帳號 <span style={{ fontWeight:400, color:T.textMuted }}>（可多張；租客唯讀）</span></label>
+            {!isViewer && (
+              <>
+                <input id="bnk-cam" type="file" accept="image/*" capture="environment" multiple onChange={handleBankUpload} style={{ display:"none" }}/>
+                <input id="bnk-pic" type="file" accept="image/*" multiple onChange={handleBankUpload} style={{ display:"none" }}/>
+                <input id="bnk-file" type="file" accept="image/*,application/pdf,*/*" multiple onChange={handleBankUpload} style={{ display:"none" }}/>
                 <div style={{ display:"flex", gap:6, marginBottom:8 }}>
                   <label htmlFor="bnk-cam" style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"8px", fontSize:12, fontWeight:700, cursor:"pointer", textAlign:"center" }}>📷 拍照</label>
                   <label htmlFor="bnk-pic" style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"8px", fontSize:12, fontWeight:700, cursor:"pointer", textAlign:"center" }}>🖼 相簿</label>
                   <label htmlFor="bnk-file" style={{ flex:1, background:T.bgMuted, color:T.textSub, border:`1px solid ${T.border}`, borderRadius:8, padding:"8px", fontSize:12, fontWeight:700, cursor:"pointer", textAlign:"center" }}>📎 檔案</label>
                 </div>
-              </>;
-            })()}
+              </>
+            )}
             {(form.ownerBankPhotos||[]).length>0 && (
               <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
-                {(form.ownerBankPhotos||[]).map((p,i)=>{
-                  const isImg = p.isImage !== false && (p.dataUrl||"").startsWith("data:image/");
-                  return (
-                    <div key={p.id||i} style={{ position:"relative" }}>
-                      {isImg
-                        ? <img src={p.dataUrl} style={{ width:72, height:72, borderRadius:7, objectFit:"cover", border:`1px solid ${T.border}`, cursor:"pointer" }} onClick={()=>setViewPhoto(p.dataUrl)}/>
-                        : <a href={p.dataUrl} download={p.name||`匯款帳號_${i+1}`} style={{ width:72, height:72, borderRadius:7, border:`1px solid ${T.border}`, background:T.bgSub, color:T.textSub, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", textDecoration:"none", fontSize:11, fontWeight:700 }}>📎<span style={{ marginTop:4, fontSize:10, maxWidth:60, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p.name||"檔案"}</span></a>}
-                      {!isViewer && <button onClick={()=>setForm(f=>({...f, ownerBankPhotos:(f.ownerBankPhotos||[]).filter((_,j)=>j!==i)}))}
-                        style={{ position:"absolute", top:-5, right:-5, width:18, height:18, borderRadius:"50%", background:T.red, color:"#fff", border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontFamily:"inherit", padding:0 }}>✕</button>}
-                    </div>
-                  );
-                })}
+                {(form.ownerBankPhotos||[]).map((p,i)=>(
+                  <CloudPhoto key={p.id||i} p={p} size={72} onView={u=>setViewPhoto(u)} downloadName={p.name||`匯款帳號_${i+1}.jpg`} allowDelete={!isViewer} onDelete={()=>removePhotoFrom("ownerBankPhotos", i)}/>
+                ))}
               </div>
             )}
           </div>
@@ -2767,11 +2940,7 @@ function Rooms({ data, currentUser, onUpdate }) {
             {(form.inspectionPhotos||[]).length>0&&(
               <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
                 {(form.inspectionPhotos||[]).map((p,i)=>(
-                  <div key={p.id||i} style={{ position:"relative" }}>
-                    <img src={p.dataUrl} style={{ width:72, height:72, borderRadius:7, objectFit:"cover", border:`1px solid ${T.border}`, cursor:"pointer" }} onClick={()=>setViewPhoto(p.dataUrl)}/>
-                    <button onClick={()=>setForm(f=>({...f,inspectionPhotos:f.inspectionPhotos.filter((_,j)=>j!==i)}))}
-                      style={{ position:"absolute", top:-5, right:-5, width:18, height:18, borderRadius:"50%", background:T.red, color:"#fff", border:"none", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontFamily:"inherit", padding:0 }}>✕</button>
-                  </div>
+                  <CloudPhoto key={p.id||i} p={p} size={72} onView={u=>setViewPhoto(u)} downloadName={p.name||`點交照片_${i+1}.jpg`} allowDelete onDelete={()=>removePhotoFrom("inspectionPhotos", i)}/>
                 ))}
               </div>
             )}
