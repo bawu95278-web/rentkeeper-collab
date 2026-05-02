@@ -371,39 +371,52 @@ function LoginScreen({ users, tenants, onLogin }) {
           )}
 
           {(selectedRole === "admin" || selectedRole === "superadmin") && (
-            <>
+            <form onSubmit={e => { e.preventDefault(); if (canSubmit && !loading) handleLogin(); }}>
               <label style={css.label}>帳號 Email</label>
               <input
                 style={css.input}
                 type="email"
+                name="email"
+                autoComplete="username"
                 value={email}
                 onChange={e => { setEmail(e.target.value); setErr(""); }}
                 placeholder="your@email.com"
-                onKeyDown={e => e.key === "Enter" && canSubmit && handleLogin()}
                 autoFocus
               />
               <label style={css.label}>密碼</label>
               <input
                 style={css.input}
                 type="password"
+                name="password"
+                autoComplete="current-password"
                 value={pw}
                 onChange={e => { setPw(e.target.value); setErr(""); }}
                 placeholder="••••••••"
-                onKeyDown={e => e.key === "Enter" && canSubmit && handleLogin()}
               />
-            </>
+
+              {err && <div style={{ color: T.red, fontSize: 13, marginBottom: 10 }}>{err}</div>}
+
+              <button
+                type="submit"
+                disabled={loading || !canSubmit}
+                style={{ ...css.btn(), width: "100%", justifyContent: "center", padding: "12px", fontSize: 15, opacity: (loading || !canSubmit) ? 0.55 : 1, marginBottom: 0 }}
+              >
+                {loading ? "登入中..." : "登入"}
+              </button>
+            </form>
           )}
 
-          {err && <div style={{ color: T.red, fontSize: 13, marginBottom: 10 }}>{err}</div>}
-
-          {selectedRole && (
-            <button
-              onClick={handleLogin}
-              disabled={loading || !canSubmit}
-              style={{ ...css.btn(), width: "100%", justifyContent: "center", padding: "12px", fontSize: 15, opacity: (loading || !canSubmit) ? 0.55 : 1, marginBottom: 0 }}
-            >
-              {loading ? "登入中..." : "登入"}
-            </button>
+          {selectedRole === "tenant" && (
+            <>
+              {err && <div style={{ color: T.red, fontSize: 13, marginBottom: 10 }}>{err}</div>}
+              <button
+                onClick={handleLogin}
+                disabled={loading || !canSubmit}
+                style={{ ...css.btn(), width: "100%", justifyContent: "center", padding: "12px", fontSize: 15, opacity: (loading || !canSubmit) ? 0.55 : 1, marginBottom: 0 }}
+              >
+                {loading ? "登入中..." : "登入"}
+              </button>
+            </>
           )}
 
           {/* Divider */}
